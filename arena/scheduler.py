@@ -7,6 +7,7 @@ exists or is running. Every pairing is played from both seats.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,9 +38,34 @@ class Job:
         return LANES[self.priority]
 
 
+_MAPS: dict = {}
+
+
+def _dir_stamp(arena: Arena, suite: str) -> tuple:
+    """Modification times of the folders a suite's listing depends on (adding or removing a
+    map changes its folder's mtime); the server suite also depends on the server folder."""
+    names = {"holdout": ["holdout", "holdout_custom"], "official": ["official", "server"]}.get(suite, [suite])
+    out = []
+    for n in names:
+        d = arena.cfg.map_dir(n)
+        try:
+            out.append((str(d), d.stat().st_mtime_ns))
+        except (OSError, AttributeError):
+            out.append((str(d), None))
+    return tuple(out)
+
+
 def maps(arena: Arena, suite: str) -> list[Path]:
+    """A suite's maps; re-listed only when one of its folders changes (listing reads every
+    map file's header)."""
     from arena.maps import suite_files
-    return suite_files(arena.cfg, suite)
+    key, stamp = (id(arena.cfg), suite), _dir_stamp(arena, suite)
+    hit = _MAPS.get(key)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    files = suite_files(arena.cfg, suite)
+    _MAPS[key] = (stamp, files)
+    return files
 
 
 def ranking(arena: Arena) -> list[str]:
@@ -113,7 +139,32 @@ def _suite_jobs(arena: Arena, s, opponents: list[str], suites: list[str], priori
     return jobs
 
 
+_OWED: dict = {}
+
+
 def owed_for(arena: Arena, s) -> list[Job]:
+    """owed_games(), cached: the set only changes with the submission's status, lane, parent
+    and opponents, or with the map pools and server seeds (re-checked every 10 s), so the
+    scheduler doesn't rebuild thousands of jobs per submission on every tick."""
+    if s.status not in (QUEUED, PLAYING, DONE, PLACING, RATED):
+        return []
+    suites = tuple((x, tuple(maps(arena, x))) for x in
+                   ("official", "tournament", "server", "custom", "rotating"))
+    key = (s.status, s.lane, s.parent, tuple(s.opponents or ()) if s.opponents is not None else None,
+           tuple(s.quick_opponents or ()) if s.quick_opponents is not None else None,
+           suites, tuple(sorted((k, tuple(v)) for k, v in server_seeds(arena).items())))
+    hit = _OWED.get((id(arena), s.id))
+    if hit and hit[0] == key and time.monotonic() - hit[1] < 60:
+        return hit[2]
+    jobs = owed_games(arena, s)
+    # freezing opponents inside owed_games changes the key; store under the new one
+    key = key[:3] + (tuple(s.opponents or ()) if s.opponents is not None else None,
+                     tuple(s.quick_opponents or ()) if s.quick_opponents is not None else None) + key[5:]
+    _OWED[(id(arena), s.id)] = (key, time.monotonic(), jobs)
+    return jobs
+
+
+def owed_games(arena: Arena, s) -> list[Job]:
     """Every game submission s is still owed (its draft or placement set), played or not.
 
     Drafts play their parent and the top bots on [play] draft_suites (default: official,
