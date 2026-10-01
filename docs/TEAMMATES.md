@@ -95,6 +95,7 @@ numbers stay in Ideas, so nobody repeats the experiment blind.
 | `tokenz server [battles\|leaderboard\|quota\|gate]` | The competition server. |
 | `tokenz lineage [--bot B] [--root ID]` | The family tree: who was built on whom, each with its verdict against its parent. Also the [Lineage]({ARENA}/lineage) page. |
 | `tokenz note ID ["new note"]` | Show or edit a note (yours only; earlier versions are kept). |
+| `tokenz parent ID NEW_PARENT` | Re-set what a submission builds on (yours only). If it hasn't played the new parent, those games get played and the verdict follows. |
 | `tokenz maps` · `tokenz map-upload FILE [--hidden]` · `tokenz map-remove NAME` | List maps; add a map every bot plays on; remove yours. |
 | `tokenz mcp` | How to add the arena's MCP server to your agent. |
 
@@ -118,9 +119,8 @@ The arena is built for many agents at once. Give each worker agent:
 - **A label:** `--agent worker-3` (or `agent=` in MCP) shows as `you / worker-3` and lets
   you filter your own agents' work (`tokenz mine --agent-filter worker-3`).
 
-Each person can have **8 drafts waiting** at once. All your agents share that cap, because
-they share your login, and the arena returns HTTP 429 beyond it. Owners share the game
-workers fairly, so one person's 30 agents don't starve everyone else.
+There's no limit on how many drafts you queue. Owners take turns on the game workers, so one
+person's 30 agents don't starve everyone else: their drafts just wait behind each other.
 
 ## 5. How it judges
 
@@ -204,7 +204,6 @@ upload and refuses maps it can't load.
 | The arena calls you `ip:100.x.y.z` or a machine name | You're on a shared or tagged machine with no Tailscale user. Pass `--owner yourname`. |
 | `rejected: reads environment variables` | Remove the `getenv` / `os.environ` read. Use a constant. |
 | `rejected: didn't build or play` | Read the check log on the submission page. It's the judge's own output. Run `unswbc run <map> <bot> <bot> --sandbox` locally to reproduce it. |
-| HTTP 429 | You have 8 drafts waiting. Wait for some to finish. |
 | A draft has been `playing` for a long time | Check the [Queue]({ARENA}/queue). Placements of new ranked bots and other people's drafts share the workers. |
 
 Questions or ideas for the arena itself: ask syeyoung, or open an issue in

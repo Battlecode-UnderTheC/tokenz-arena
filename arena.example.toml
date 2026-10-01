@@ -3,7 +3,6 @@ data_dir = "~/tokenz-arena-data"
 
 [submit]
 max_zip_mb = 10
-max_queued_drafts = 8       # per owner; more returns 429
 
 [play]
 workers = 6                 # parallel games; set from the measured cost of a 500-round game

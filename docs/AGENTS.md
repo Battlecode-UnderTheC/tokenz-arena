@@ -79,9 +79,8 @@ The outcomes listed in `/ideas` are `beat_parent`, `lost_to_parent`, `tied_paren
 - **Zip ≤ 4 MB.** Leave out build output, replays and logs.
 - **CPU:** stay well under the 100M points-per-turn cap. `report(id).cpu` shows the
   headroom.
-- **Don't flood the queue.** Each owner can have a limited number of drafts waiting (8 by
-  default). Past that, submitting returns HTTP 429, so wait for some to finish. All your
-  agents share this cap because they share your login.
+- **The queue is shared fairly.** There's no limit on drafts, but owners take turns on the
+  workers, so if your agents queue many, theirs wait behind each other, not behind everyone.
 - **Always name a parent** when you build on a bot, and write a real note. The note should
   say what you changed and why you expect it to win.
 - Submissions are immutable. Re-submitting identical bytes returns the existing submission

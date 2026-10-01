@@ -193,6 +193,46 @@ def edit_note(arena: Arena, sid: str, note: str, by: str) -> object:
     return s
 
 
+def set_parent(arena: Arena, sid: str, parent: str | None, by: str) -> object:
+    """Re-parents a submission (its owner's, or a local admin's). The old parent is kept in
+    parent_history. If it hasn't played the new parent yet, those games are scheduled: a
+    draft goes back to 'queued', a ranked one to 'placing', and its verdict follows."""
+    from arena.state import DONE as _DONE, PLACING, QUEUED, RATED as _RATED, now
+    s = arena.subs.get(sid)
+    if not s or s.status == "external":
+        raise HTTPException(404, f"no submission {sid!r}")
+    if by not in (s.owner, "local"):
+        raise HTTPException(403, f"only {s.owner} can change the parent of {sid}")
+    parent = parent or None
+    if parent is not None:
+        p = arena.subs.get(parent)
+        if not p or p.status == "external":
+            raise HTTPException(400, f"no submission {parent!r}")
+        if p.status == REJECTED:
+            raise HTTPException(400, f"{parent} was rejected, so it can't be played against")
+        cur, seen = parent, set()
+        while cur and cur not in seen:            # no cycles: the new parent can't descend from sid
+            if cur == sid:
+                raise HTTPException(400, f"{parent} descends from {sid}; that would make a cycle")
+            seen.add(cur)
+            cur = arena.subs[cur].parent if cur in arena.subs else None
+    with arena.lock:
+        if parent == s.parent:
+            return s
+        s.parent_history.append({"at": now(), "by": by, "parent": s.parent})
+        s.parent = parent
+        if parent and s.opponents is not None and parent not in s.opponents:
+            s.opponents = [parent] + s.opponents     # the verdict needs games against it
+            if s.status == _DONE:
+                s.status = QUEUED
+            elif s.status == _RATED:
+                s.status = PLACING
+        arena.save_sub(s)
+    if getattr(arena, "daemon", None):
+        arena.daemon.wake.set()
+    return s
+
+
 def find_game(arena: Arena, gid: int):
     """A game by id; holdout games are hidden (None), so their maps and replays never leak."""
     for g in reversed(arena.games):
@@ -261,13 +301,6 @@ def create_app(arena: Arena) -> FastAPI:
                               agent: str | None = Form(None), owner: str | None = Form(None)):
         c = caller(request, agent, owner)
         blob = await file.read()
-        cap = arena.cfg.get("submit", "max_queued_drafts", 8)
-        with arena.lock:
-            queued = sum(1 for s in arena.subs.values() if s.owner == c.owner and s.lane == "draft"
-                         and s.status in ("checking", "queued", "playing"))
-        if lane == "draft" and queued >= cap:
-            raise HTTPException(429, f"{c.owner} already has {queued} drafts waiting (limit {cap}); "
-                                     "wait for some to finish")
         try:
             s, new = submit.accept(arena, blob=blob, bot=bot, owner=c.owner, note=note,
                                    parent=parent or None, source=source or None, lane=lane,
@@ -300,14 +333,26 @@ def create_app(arena: Arena) -> FastAPI:
 
     @api.patch("/submissions/{sid}")
     async def patch_submission(sid: str, request: Request):
-        """Edit a submission's note: JSON {"note": "..."}. Only its owner; history is kept."""
+        """Edit a submission: JSON {"note": "..."} and/or {"parent": "<id>" | null}. Only its
+        owner; earlier values are kept in note_history / parent_history."""
+        usage = 'send JSON: {"note": "..."} and/or {"parent": "<submission id>" or null}'
         try:
             body = await request.json()
         except ValueError:
-            raise HTTPException(400, 'send JSON: {"note": "..."}')
-        if not isinstance(body, dict) or not isinstance(body.get("note"), str):
-            raise HTTPException(400, 'send JSON: {"note": "..."}')
-        return sub_json(arena, edit_note(arena, sid, body["note"], caller(request).owner), detail=True)
+            raise HTTPException(400, usage)
+        if not isinstance(body, dict) or not ({"note", "parent"} & body.keys()):
+            raise HTTPException(400, usage)
+        if "note" in body and not isinstance(body["note"], str):
+            raise HTTPException(400, usage)
+        if "parent" in body and body["parent"] is not None and not isinstance(body["parent"], str):
+            raise HTTPException(400, usage)
+        by = caller(request).owner
+        s = arena.subs.get(sid)
+        if "parent" in body:
+            s = set_parent(arena, sid, body["parent"], by)
+        if "note" in body:
+            s = edit_note(arena, sid, body["note"], by)
+        return sub_json(arena, s, detail=True)
 
     @api.get("/lineage")
     def get_lineage(root: str | None = None, bot: str | None = None, hide_rejected: bool = False):

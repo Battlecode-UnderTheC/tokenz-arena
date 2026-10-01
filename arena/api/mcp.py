@@ -179,8 +179,7 @@ def make_server(app: FastAPI) -> MCPServer:
         "ranked" = straight to placement. `agent` labels which of your agents submitted.
         `owner` only takes effect from tagged devices (no Tailscale user login).
 
-        Identical content returns the existing submission with "duplicate": true. Too many of
-        your drafts already waiting -> an HTTP 429 error; wait for some to finish. Bots must
+        Identical content returns the existing submission with "duplicate": true. Bots must
         not read environment variables (rejected). Next: wait(id)."""
         if (files is None) == (zip_base64 is None):
             raise ToolError("pass exactly one of files ({path: text}) or zip_base64")
@@ -306,6 +305,13 @@ def make_server(app: FastAPI) -> MCPServer:
         showed, or correct the hypothesis; earlier versions are kept in note_history."""
         return await api.call(ctx, "PATCH", f"/submissions/{id}", json_body={"note": note})
 
+    @mcp.tool()
+    async def set_parent(ctx: Context, id: str, parent: str | None) -> CallToolResult:
+        """Change which submission `id` builds on (only its owner can; null for none). If it
+        hasn't played the new parent yet, the arena schedules those games and the verdict
+        (vs_parent) follows; call wait(id) for it. The old parent is kept in parent_history."""
+        return await api.call(ctx, "PATCH", f"/submissions/{id}", json_body={"parent": parent})
+
     @mcp.tool(annotations=READ)
     async def lineage(ctx: Context, bot: str | None = None, root: str | None = None) -> CallToolResult:
         """The family forest: each submission under its parent (across bots), with its verdict
@@ -378,7 +384,7 @@ def make_server(app: FastAPI) -> MCPServer:
 
 
 TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
-         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "lineage",
+         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "lineage",
          "queue", "server_status",
          "server_battles",
          "server_battle", "server_leaderboard", "server_quota")

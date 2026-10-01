@@ -185,3 +185,25 @@ def test_note_edit_and_lineage(arena):
     assert c.get(f"/api/v1/lineage?root={d.id}").json()[0]["id"] == d.id
     assert c.get("/lineage").status_code == 200 and d.id in c.get("/lineage").text
     assert c.get(f"/s/{d.id}", headers=alice).status_code == 200
+
+
+def test_set_parent_reschedules_and_refuses_cycles(arena):
+    from fastapi.testclient import TestClient
+    from arena.api.http import create_app
+    p = add(arena, "base")
+    q = add(arena, "other")
+    d = add(arena, "base", lane="draft", parent=p.id)
+    scheduler.owed_for(arena, d)                       # freezes its opponents
+    d.status = "done"
+    c = TestClient(create_app(arena))
+    alice = {"tailscale-user-login": "alice"}
+    r = c.patch(f"/api/v1/submissions/{p.id}", json={"parent": d.id}, headers=alice)
+    assert r.status_code == 400 and "cycle" in r.json()["detail"]
+    arena.subs[d.id].opponents = [p.id]                # as if q weren't among its opponents
+    r = c.patch(f"/api/v1/submissions/{d.id}", json={"parent": q.id}, headers=alice)
+    assert r.status_code == 200, r.text
+    d2 = r.json()
+    assert d2["parent"] == q.id and d2["status"] == "queued" and d2["parent_history"][0]["parent"] == p.id
+    assert any(q.id in (j.a, j.b) for j in scheduler.owed_for(arena, arena.subs[d.id]))
+    assert c.patch(f"/api/v1/submissions/{d.id}", json={"parent": None},
+                   headers={"tailscale-user-login": "bob"}).status_code == 403

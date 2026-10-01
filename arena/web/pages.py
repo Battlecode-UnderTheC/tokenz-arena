@@ -577,7 +577,18 @@ document.getElementById("promote").onclick = async (ev) => {{
 <div>bot</div><div>{bot_link(s.bot)}</div>
 <div>owner / agent</div><div>{who(s.owner, s.agent)}</div>
 <div>lane / status</div><div>{e(s.lane)} {status_chip(s.status)}</div>
-<div>parent</div><div>{sub_link(arena, s.parent, with_bot=True)}</div>
+<div>parent</div><div>{sub_link(arena, s.parent, with_bot=True)}
+{'<button class="small" onclick="setParent()">change</button>' if can_edit else ''}
+{f' <span class="muted" title="{e(", ".join(f"{h['parent'] or 'none'} (until {h['at'][:16]}, changed by {h['by']})" for h in s.parent_history))}">(was {e(s.parent_history[-1]["parent"] or "none")})</span>' if s.parent_history else ''}
+<script>
+async function setParent() {{
+  const v = prompt("New parent submission id (empty for none). If it hasn't played that one yet, the arena plays those games and the verdict follows.", {json.dumps(s.parent or "")});
+  if (v === null) return;
+  const r = await fetch("/api/v1/submissions/{q(s.id)}", {{method: "PATCH",
+    headers: {{"Content-Type": "application/json"}}, body: JSON.stringify({{parent: v.trim() || null}})}});
+  if (r.ok) location.reload(); else alert((await r.json()).detail || r.status);
+}}
+</script></div>
 <div>created</div><div>{when(s.created)}</div>
 {f'<div>promoted</div><div>{when(s.promoted)} by {e(s.promoted_by)}</div>' if s.promoted else ''}
 <div>elo</div><div>{f'{rt["elo"]:.0f} ± {rt.get("err") or 0:.0f}' if rt.get("elo") is not None else '-'}</div>

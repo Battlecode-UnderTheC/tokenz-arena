@@ -11,6 +11,7 @@ parallel games never share build output. The result is parsed from the judge's s
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ _POINTS = re.compile(r"^team ([AB]) points per turn: p50 ([\d.]+)([KMG]?)\s+p99 
                      r"mean ([\d.]+)([KMG]?)\s+max ([\d.]+)([KMG]?)", re.M)
 _REPLAY = re.compile(r"^wrote replay: (.+)$", re.M)
 _SCALE = {"": 1, "K": 1e3, "M": 1e6, "G": 1e9}
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")   # colour codes the toolkit may add
 
 
 @dataclass
@@ -62,6 +64,7 @@ def _num(value: str, unit: str) -> float:
 
 
 def parse(log: str) -> GameResult:
+    log = _ANSI.sub("", log)
     if m := _WIN.search(log):
         winner, rounds, reason = m.group(1), int(m.group(2)), m.group(3)
     elif m := _DRAW.search(log):
@@ -99,9 +102,10 @@ def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
         cmd = [unswbc, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
                "-v", "-o", str(out)]
         start = time.monotonic()
+        env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}   # plain output to parse
         try:
             proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout,
-                                  errors="replace")
+                                  errors="replace", env=env)
         except subprocess.TimeoutExpired as e:
             raise JudgeError(f"judge timed out after {timeout:.0f}s", str(e.stdout or "")) from e
         log = proc.stdout + proc.stderr

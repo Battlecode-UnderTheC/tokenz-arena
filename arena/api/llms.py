@@ -65,8 +65,8 @@ Checks (failing one -> status "rejected" with `reason` and `check_log`):
      [project] language = py | python | c | cpp
   2. no environment-variable reads (os.environ / os.getenv / getenv / environ): rejected
   3. builds and survives one sandboxed game on the smallest map
-Errors: 400 bad input (reason in "detail"); 429 when you already have {cap} drafts waiting
-(per owner): wait for some to finish. Re-submitting identical zip bytes returns the existing
+Errors: 400 bad input (reason in "detail"). There's no limit on queued drafts; owners share
+the workers fairly, so yours wait their turn. Re-submitting identical zip bytes returns the existing
 submission with "duplicate": true (HTTP 200).
 
 ## Statuses and outcomes
@@ -127,7 +127,9 @@ POST /api/v1/maps   multipart: file (.map), name, note, hidden=true|false
                                             add a map every bot plays on (custom suite), or a
                                             hidden holdout map; the judge test-plays it first
 DELETE /api/v1/maps/custom/{{name}}          remove a map you uploaded (its games stay)
-PATCH  /api/v1/submissions/{{id}}  JSON {{"note": "..."}}   edit a note (owner only; history kept)
+PATCH  /api/v1/submissions/{{id}}  JSON {{"note": "..."}} and/or {{"parent": "<id>" | null}}
+                                            edit the note or re-set the parent (owner only;
+                                            history kept; games vs a new parent get scheduled)
 GET  /api/v1/lineage?bot=&root=             the family forest: nodes {{id, bot, lane, status,
                                             vs_parent {{W, D, L, beats_parent, significant}},
                                             elo, current, children: [...]}}
@@ -147,7 +149,7 @@ Tools wrap the endpoints above (same JSON):
   source(id) -> {{"files": {{path: text}}, "skipped": {{...}}}}   (edit, then submit(files=...))
   leaderboard()  bot(name)  ideas(q, bot, outcome)  games(sub, vs, map, suite, lane, result,
   limit)  game(id)  map_stats()  maps()  upload_map(text, name, note, hidden)  queue()
-  edit_note(id, note)  lineage(bot, root)
+  edit_note(id, note)  set_parent(id, parent)  lineage(bot, root)
   server_status()  server_battles(limit)  server_battle(id)  server_leaderboard()
   server_quota()
 
@@ -194,4 +196,4 @@ def render(arena, base: str = "") -> str:
                                                          if s.status != "external"),
         n_games=len(arena.games), workers=workers, waiting=waiting, top=_top(arena),
         top_n=arena.cfg.get("play", "draft_top_n", 3), max_mb=submit.MAX_ZIP // 2**20,
-        cap=arena.cfg.get("submit", "max_queued_drafts", 8))
+        cap=0)

@@ -418,6 +418,17 @@ def cmd_note(args):
                                   f"({len(d.get('note_history') or [])} earlier version(s) kept)"))
 
 
+def cmd_parent(args):
+    new = None if args.parent.lower() in ("none", "-", "") else args.parent
+    body = json.dumps({"parent": new}).encode()
+    d = request(args, "PATCH", f"/api/v1/submissions/{urllib.parse.quote(args.id)}", body,
+                "application/json")
+    emit(args, d, lambda d: print(
+        f"{d['id']}: parent is now {d.get('parent') or 'none'} (status {d['status']}"
+        + ("; games against it are scheduled" if d["status"] in ("queued", "playing", "placing") else "")
+        + ")"))
+
+
 def cmd_lineage(args):
     def walk(n, prefix="", last=True, top=True):
         vp = n.get("vs_parent") or {}
@@ -569,6 +580,10 @@ def main(argv=None) -> int:
     s.add_argument("text", nargs="?", help="the new note (omit to just show it)")
     s.add_argument("--file", help="read the new note from a file")
     s.set_defaults(f=cmd_note)
+    s = sp.add_parser("parent", help="change a submission's parent (yours only; the verdict follows)")
+    s.add_argument("id")
+    s.add_argument("parent", help="the new parent's submission id, or 'none'")
+    s.set_defaults(f=cmd_parent)
     s = sp.add_parser("lineage", help="the family tree: who was built on whom, with verdicts")
     s.add_argument("--bot", help="only the trees that contain this bot")
     s.add_argument("--root", help="only the subtree of this submission")

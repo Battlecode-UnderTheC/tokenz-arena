@@ -78,7 +78,7 @@ def test_llms_txt(arena):
     assert "https://arena.example.ts.net/mcp" in t
     assert "curl -F file=@bot.zip -F bot=swarm" in t
     for word in ("beat_parent", "lost_to_parent", "tied_parent", "no_parent", "pending",
-                 "rejected", "429", "4 MB", "?wait=", "/promote", "/api/v1/ideas",
+                 "rejected", "4 MB", "?wait=", "/promote", "/api/v1/ideas",
                  "/api/v1/games?sub=", "/api/v1/stats/maps", "/api/v1/queue", "Tailscale"):
         assert word in t, word
     for tool in arena_mcp.TOOLS:

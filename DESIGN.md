@@ -198,8 +198,8 @@ Priority order, each level only when the one above is idle:
    the closest ratings.
 
 When drafts pile up, owners share the workers fairly, so one teammate's 20 agents can't
-starve the others. Each owner also has a cap on queued drafts, and submitting past it
-returns 429.
+starve the others. There's no cap on how many drafts anyone queues: a busy owner's drafts just
+wait their turn.
 
 ## 4. Ratings
 

@@ -3,7 +3,6 @@
 data_dir = "/data"
 
 [submit]
-max_queued_drafts = 8
 
 [play]
 workers = 20                # 28 cores; a game is about one core
