@@ -236,3 +236,21 @@ def test_verdict_splits_by_how_games_ended(arena):
     vp = report.verdict(arena, d.id)["vs_parent"]
     assert vp["by_end"]["longer queen"]["L"] == 1 and vp["by_end"]["elimination"]["W"] == 1
     assert vp["server_maps"] is None
+
+
+def test_retire_and_promote_replaces(arena):
+    from fastapi.testclient import TestClient
+    from arena.api.http import create_app
+    a1 = add(arena, "queen-a")
+    b1 = add(arena, "queen-b")
+    d = add(arena, "queen-c", lane="draft")
+    d.status = "done"
+    c = TestClient(create_app(arena))
+    alice, bob = {"tailscale-user-login": "alice"}, {"tailscale-user-login": "bob"}
+    assert c.post(f"/api/v1/submissions/{a1.id}/retire", headers=bob).status_code == 403
+    r = c.post(f"/api/v1/submissions/{a1.id}/retire", headers=alice)
+    assert r.status_code == 200 and r.json()["status"] == "retired"
+    assert arena.bots["queen-a"]["current"] is None and a1.id not in {s.id for s in arena.current()}
+    r = c.post(f"/api/v1/submissions/{d.id}/promote?replaces={b1.id}", headers=alice)
+    assert r.status_code == 200 and r.json()["status"] == "placing"
+    assert arena.subs[b1.id].status == "retired" and arena.subs[b1.id].retired_by == "alice"

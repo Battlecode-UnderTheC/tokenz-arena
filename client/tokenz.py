@@ -357,9 +357,24 @@ def load_table(path: str) -> dict:
     return out
 
 
-def cmd_promote(args):
+def cmd_retire(args):
     def one(i):
-        d = request(args, "POST", f"/api/v1/submissions/{urllib.parse.quote(i)}/promote")
+        d = request(args, "POST", f"/api/v1/submissions/{urllib.parse.quote(i)}/retire")
+        if not args.json:
+            print(f"{d['id']}: retired (off the leaderboard; its games stay)")
+        return d
+    return batch(args, args.ids, one)
+
+
+def cmd_promote(args):
+    if args.replaces and len(args.ids) != 1:
+        raise Fail("--replaces takes one submission to promote")
+
+    def one(i):
+        q = f"?replaces={urllib.parse.quote(args.replaces)}" if args.replaces else ""
+        d = request(args, "POST", f"/api/v1/submissions/{urllib.parse.quote(i)}/promote{q}")
+        if args.replaces and not args.json:
+            print(f"{args.replaces}: retired")
         if not args.json:
             print(f"{d['id']}: promoted ({d['status']}); quick placement first, then a top-up")
         return d
@@ -624,7 +639,11 @@ def main(argv=None) -> int:
     s.set_defaults(f=cmd_report)
     s = sp.add_parser("promote", help="make finished drafts ranked (they join the leaderboard)")
     s.add_argument("ids", nargs="+", metavar="ID")
+    s.add_argument("--replaces", metavar="OLD", help="also retire OLD (yours), e.g. a differently named entry this supersedes")
     s.set_defaults(f=cmd_promote)
+    s = sp.add_parser("retire", help="take submissions off the leaderboard (yours only; games stay)")
+    s.add_argument("ids", nargs="+", metavar="ID")
+    s.set_defaults(f=cmd_retire)
     s = sp.add_parser("get", help="download a submission's source to build on")
     s.add_argument("id")
     s.add_argument("dir", nargs="?", help="where to unpack (default: ./<id>)")

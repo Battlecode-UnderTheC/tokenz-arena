@@ -52,6 +52,8 @@ class Submission:
     parent_history: list = field(default_factory=list)  # earlier parents: [{at, by, parent}]
     quick_opponents: list | None = None   # placement's first round: parent + top bots
     engine: str = ""                      # the judge (rules) version it was submitted under
+    retired_at: str | None = None
+    retired_by: str | None = None
     opponents: list | None = None   # frozen when its draft or placement starts
 
 

@@ -306,6 +306,12 @@ def make_server(app: FastAPI) -> MCPServer:
         return await api.call(ctx, "PATCH", f"/submissions/{id}", json_body={"note": note})
 
     @mcp.tool()
+    async def retire(ctx: Context, id: str) -> CallToolResult:
+        """Take a submission off the leaderboard (only its owner can): status retired, no longer
+        its bot's current version. Its games, verdicts and source stay."""
+        return await api.call(ctx, "POST", f"/submissions/{id}/retire")
+
+    @mcp.tool()
     async def server_link(ctx: Context, server_version: str, arena_id: str) -> CallToolResult:
         """Say which arena submission one of our competition-server versions is (for versions
         uploaded by hand, not by auto-submit). The auto-submit gate compares candidates with the
@@ -392,7 +398,7 @@ def make_server(app: FastAPI) -> MCPServer:
 
 
 TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
-         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "server_link", "lineage",
+         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "retire", "server_link", "lineage",
          "queue", "server_status",
          "server_battles",
          "server_battle", "server_leaderboard", "server_quota")

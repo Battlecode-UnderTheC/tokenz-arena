@@ -216,6 +216,18 @@ def _reference_dir(arena: Arena) -> Path | None:
     return None
 
 
+def retire(arena: Arena, s: Submission, by: str):
+    """Takes a submission off the leaderboard: retired, and no longer its bot's current
+    version. Its games, verdicts and source stay."""
+    with arena.lock:
+        b = arena.bots.get(s.bot)
+        if b and b.get("current") == s.id:
+            b["current"] = None
+            arena.save_bots()
+        s.status, s.retired_at, s.retired_by = RETIRED, now(), by
+        arena.save_sub(s)
+
+
 def make_current(arena: Arena, s: Submission, by: str | None = None):
     """Ranked: s becomes its bot's current submission and starts placement."""
     with arena.lock:

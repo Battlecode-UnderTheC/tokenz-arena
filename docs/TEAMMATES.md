@@ -84,6 +84,8 @@ numbers stay in Ideas, so nobody repeats the experiment blind.
 | `tokenz submit DIR --bot NAME --note "..." [--parent ID] [--lane ranked] [--wait]` | Zip and submit (a draft by default). |
 | `tokenz wait ID` · `tokenz show ID` | Wait for the verdict, or just show status and verdict. |
 | `tokenz report ID` | Where it loses: opponents, maps, deaths, CPU, worst losses with watch links. |
+| `tokenz retire ID [ID ...]` | Take submissions off the leaderboard (yours only); their games and verdicts stay. |
+| `tokenz promote NEW --replaces OLD` | Promote NEW and retire OLD in one go, e.g. when the new version has a different bot name. |
 | `tokenz promote ID [ID ...]` | Draft to ranked (several at once). A ranked bot gets a quick placement (parent and top 5) and is rated, then tops up against everyone in the background. |
 | `tokenz get ID [DIR]` | Download a submission's source. |
 | `tokenz leaderboard` (`lb`) | Current ranked bots. |

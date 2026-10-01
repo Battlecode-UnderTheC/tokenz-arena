@@ -80,6 +80,8 @@ outcome (in /ideas): beat_parent | lost_to_parent | tied_parent | no_parent | pe
 
 POST /api/v1/submissions                    submit (above)
 POST /api/v1/submissions/{{id}}/promote       draft -> ranked; returns the submission
+     ?replaces=<old>                         ... and retire <old> (yours) in the same call
+POST /api/v1/submissions/{{id}}/retire        off the leaderboard (owner only; games stay)
 GET  /api/v1/submissions/{{id}}[?wait=S]      one submission; wait=S (<= 1800) blocks until
      done/rated/rejected/retired
   {{"id": "swarm-7", "bot": "swarm", "owner": "alice@github", "agent": "worker-3",
@@ -149,7 +151,7 @@ Tools wrap the endpoints above (same JSON):
   source(id) -> {{"files": {{path: text}}, "skipped": {{...}}}}   (edit, then submit(files=...))
   leaderboard()  bot(name)  ideas(q, bot, outcome)  games(sub, vs, map, suite, lane, result,
   limit)  game(id)  map_stats()  maps()  upload_map(text, name, note, hidden)  queue()
-  edit_note(id, note)  set_parent(id, parent)  lineage(bot, root)
+  edit_note(id, note)  set_parent(id, parent)  retire(id)  lineage(bot, root)
   server_link(server_version, arena_id)   (POST /api/v1/server/versions/{{ver}}/link {{"arena": id}})
   server_status()  server_battles(limit)  server_battle(id)  server_leaderboard()
   server_quota()

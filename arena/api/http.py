@@ -411,15 +411,39 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
     def get_lineage(root: str | None = None, bot: str | None = None, hide_rejected: bool = False):
         return lineage(arena, root, bot, hide_rejected)
 
+    def owned(s, by: str, verb: str):
+        if by not in (s.owner, "local"):
+            raise HTTPException(403, f"only {s.owner} can {verb} {s.id}")
+
     @api.post("/submissions/{sid}/promote")
-    def promote(sid: str, request: Request):
+    def promote(sid: str, request: Request, replaces: str | None = None):
+        """Make a checked submission ranked. `replaces=<id>` also retires that one (yours), e.g.
+        when the new version has a different bot name than the entry it supersedes."""
         s = get_sub(sid)
+        by = caller(request).owner
+        old = get_sub(replaces) if replaces else None
+        if old is not None:
+            owned(old, by, "retire")
+            if old.id == s.id:
+                raise HTTPException(400, "a submission can't replace itself")
         if s.status in ("checking", REJECTED, "external"):
             raise HTTPException(409, f"{sid} is {s.status}; only checked submissions can be promoted")
-        if s.lane == "ranked" and s.status in ("placing", RATED):
-            return sub_json(arena, s)
-        submit.make_current(arena, s, by=caller(request).owner)
+        if not (s.lane == "ranked" and s.status in ("placing", RATED)):
+            submit.make_current(arena, s, by=by)
+        if old is not None and old.status != "retired":
+            submit.retire(arena, old, by)
         arena.daemon.wake.set() if getattr(arena, "daemon", None) else None
+        return sub_json(arena, s)
+
+    @api.post("/submissions/{sid}/retire")
+    def retire(sid: str, request: Request):
+        """Take a submission off the leaderboard (owner only). Its games and verdicts stay."""
+        s = get_sub(sid)
+        by = caller(request).owner
+        owned(s, by, "retire")
+        if s.status in ("checking", "external"):
+            raise HTTPException(409, f"{sid} is {s.status}")
+        submit.retire(arena, s, by)
         return sub_json(arena, s)
 
     @api.get("/submissions/{sid}/report")
