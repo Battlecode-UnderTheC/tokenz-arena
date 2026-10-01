@@ -1,0 +1,9 @@
+[Unit]
+Description=tokenz-arena: check for new commits every 3 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=3min
+
+[Install]
+WantedBy=timers.target

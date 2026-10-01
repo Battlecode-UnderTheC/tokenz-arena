@@ -1,0 +1,6 @@
+[Unit]
+Description=tokenz-arena: pull main and redeploy if it moved
+
+[Service]
+Type=oneshot
+ExecStart=%h/tokenz-arena/deploy/update.sh

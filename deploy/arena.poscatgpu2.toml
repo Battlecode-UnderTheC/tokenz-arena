@@ -1,0 +1,29 @@
+# arena.toml for the container on poscatgpu2 (copied to $ARENA_DATA/arena.toml on first deploy;
+# edit it there afterwards). Paths are inside the container: /data is ARENA_DATA.
+data_dir = "/data"
+
+[submit]
+max_queued_drafts = 8
+
+[play]
+workers = 20                # 28 cores; a game is about one core
+reference_bot = "reference"
+draft_top_n = 3
+game_timeout = 1800
+
+[maps]
+official = "<repo>/maps/official"
+rotating = "maps/rotating"
+holdout = "maps/holdout"
+server = "maps/server"
+
+[seeds]
+official = [1592614637]
+rotating = [1592614637]
+holdout = [1592614637]
+
+[server]
+key_file = "/secrets/unswbc-key"
+auto_submit = true
+min_hours = 4
+poll_seconds = 60

@@ -19,7 +19,7 @@ order in `DESIGN.md`.
 | `arena/web/viewer.py` | The toolkit's replay viewer in a plain browser page (working). |
 | `arena/cli.py` | The `arena` command. |
 | `maps/official/` | The official maps. The holdout pool lives only in the data directory. |
-| `deploy/arena.service` | The systemd user service for poscatgpu2. |
+| `Dockerfile`, `compose.yaml`, `deploy/` | The container, its Tailscale sidecar, and pull-based CD on poscatgpu2 (`update.sh` + a systemd user timer). |
 | `arena.example.toml` | Copy to `arena.toml` (not committed). |
 
 ## Use

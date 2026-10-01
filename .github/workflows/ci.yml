@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Without the `server` extra: bcweb is a private repo, and the org disables deploy keys.
+      # bcweb (the `server` extra) is a private repo in the org; read with a read-only deploy key.
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BCWEB_DEPLOY_KEY }}
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv sync --locked
+      - run: uv sync --locked --extra server
       - run: uv run pytest -q

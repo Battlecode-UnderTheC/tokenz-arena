@@ -356,15 +356,31 @@ is recorded on the site under that member's name. Copying them there is the user
 
 ## 9. Deployment on poscatgpu2
 
-- Python 3.12 with `uv`. unswbc goes in the project venv at the competition's version.
-- One systemd user service (`deploy/arena.service`, running `arena serve`). Run
-  `loginctl enable-linger` so it survives logout.
-- State lives in `~/tokenz-arena-data/`: `submissions/`, `games/`, `replays/`, `work/`,
-  `maps/holdout/`, `ratings.json`, `logs/`. Back it up with `rsync`.
-- Network: Tailscale only. `tailscale serve` gives it an HTTPS name on the tailnet
-  (`https://poscatgpu2.<tailnet>.ts.net`). It's never exposed publicly, and there's no auth
-  beyond being on the tailnet. Teammates are told apart by their Tailscale login (section 1).
-  The tailnet's ACLs decide who can reach it at all.
+- **Container:** one image (`Dockerfile`: Python 3.12, uv, the pinned unswbc, the arena, and
+  `bcweb` from a build context). `compose.yaml` runs it next to a **Tailscale sidecar**
+  (`tailscale/tailscale`, userspace networking, so no sudo and nothing installed on the
+  host).
+  - The arena shares the sidecar's network namespace and listens on `127.0.0.1:8700` only.
+    The one way in is `tailscale serve` (`deploy/serve.json`), which is HTTPS on the tailnet
+    at `https://tokenz-arena.<tailnet>.ts.net` and adds `Tailscale-User-Login`.
+  - The container runs as the host user, so files in the data directory stay theirs.
+- **State** lives in `ARENA_DATA` (`~/tokenz-arena-data`): `arena.toml`, `submissions/`,
+  `games/`, `replays/`, `bots/`, `maps/{rotating,holdout,server}/`, `server/`, `ratings.json`.
+  The judge's toolchain and wasm build cache live in `ARENA_CACHE`. Secrets (the server key)
+  are in `ARENA_SECRETS`, mounted read-only. Back up `ARENA_DATA` with `rsync`.
+- **CI** (`.github/workflows/ci.yml`): `uv sync --locked --extra server` and pytest on every
+  push and PR. It reads `bcweb` with a read-only deploy key (secret `BCWEB_DEPLOY_KEY`).
+- **CD** is pull-based, so poscatgpu2 needs no inbound access and GitHub holds no server
+  secrets. `arena-update.timer` (systemd user timer, every 3 minutes) runs
+  `deploy/update.sh`:
+  1. fast-forward `tokenz-arena` and `bcweb` to `origin/main`, using read-only deploy keys
+     (`~/.ssh/deploy-*`, host aliases `github-tokenz-arena` and `github-bcweb`);
+  2. if either moved: rebuild the image, smoke-test it, then `docker compose up -d`.
+
+  A failed build or smoke test leaves the running arena alone. A restart re-queues the
+  games that were running.
+- **Disk:** the root volume had 106 GB free on 2026-10-01. Replay retention (section 5)
+  keeps it bounded.
 
 ## Build order
 
@@ -376,7 +392,7 @@ is recorded on the site under that member's name. Copying them there is the user
 5. Replay and source downloads, games, `/ideas`, `/llms.txt`.
 5b. The website: leaderboard, submission, game (with the viewer) and submit pages first.
 6. MCP.
-7. Deploy on poscatgpu2 behind `tailscale serve`; seed it with our best bots.
+7. Deploy on poscatgpu2 (container + Tailscale sidecar, pull-based CD); seed it with our best bots.
 8. Holdout, continuous matches, retention, the remaining web pages.
 9. The server bridge, in this order: the read endpoints and auto-download (read-only);
    the server suite; challenges; auto-submit. The key and the web login go on poscatgpu2 by
