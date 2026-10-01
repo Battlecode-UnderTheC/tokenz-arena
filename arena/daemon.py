@@ -167,7 +167,11 @@ class Daemon:
         if replay and replay.exists():
             cfg.replays.mkdir(parents=True, exist_ok=True)
             dest = cfg.replays / f"{g.id}.replay"
-            shutil.move(str(replay), dest)
+            from arena import retention
+            if retention.is_gzip(replay):
+                shutil.move(str(replay), dest)
+            else:
+                retention.compress_file(replay, dest)        # stored gzip-compressed
             g.replay = dest.name
             a.save_game(g)
         log.info("game %d %s vs %s on %s (%s): %s", g.id, g.a, g.b, g.map, worker,

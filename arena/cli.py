@@ -70,8 +70,9 @@ def _engine(args: argparse.Namespace) -> int:
         bridge.install(arena, daemon)
     except ModuleNotFoundError:
         pass
-    from arena import workers
+    from arena import retention, workers
     workers.install(arena, daemon)
+    retention.install(daemon)
     daemon.start()
     uvicorn.run(create_app(arena), host="127.0.0.1",
                 port=args.port or cfg.get("api", "engine_port", 8701), log_level="warning")

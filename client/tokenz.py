@@ -426,6 +426,9 @@ def cmd_get(args):
 
 def cmd_replay(args):
     blob = request(args, "GET", f"/api/v1/games/{args.game}/replay", raw=True)
+    if blob[:2] == b"\x1f\x8b":                  # served compressed: store it as the judge writes it
+        import gzip
+        blob = gzip.decompress(blob)
     out = Path(args.out or f"game-{args.game}.replay")
     out.write_bytes(blob)
     print(f"{out} ({len(blob) // 1024} KB); watch it at {arena_url(args)}/games/{args.game}")

@@ -507,7 +507,9 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
         p = arena.cfg.replays / (g.replay or "")
         if not g.replay or not p.exists():
             raise HTTPException(404, "replay not kept")
-        return FileResponse(p, media_type="application/octet-stream",
+        from arena.retention import is_gzip
+        headers = {"Content-Encoding": "gzip"} if is_gzip(p) else {}   # browsers unpack it
+        return FileResponse(p, media_type="application/octet-stream", headers=headers,
                             filename=f"{g.a}-vs-{g.b}-on-{g.map}-{g.id}.replay")
 
     @api.get("/stats/maps")

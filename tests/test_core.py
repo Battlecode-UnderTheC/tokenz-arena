@@ -309,3 +309,21 @@ def test_migrate_removes_then_renames(arena, tmp_path):
     b = A(arena.cfg)
     assert b.subs["queen-1"].sha256 == old.sha256 and not b.games
     assert (arena.cfg.data_dir / "removed" / "submissions" / "queen-1").exists()
+
+
+def test_replays_compressed_and_pruned(arena):
+    from arena import retention
+    arena.cfg.replays.mkdir(parents=True)
+    games = []
+    for i, lane in enumerate(["draft", "server", "draft", "draft"]):
+        g = arena.add_game(Game(id=0, lane=lane, suite="official", map="one", seed=i, a="x", b="y",
+                                winner="A", rounds=10))
+        (arena.cfg.replays / f"{g.id}.replay").write_bytes(bytes(range(256)) * 4000)   # ~1 MB
+        g.replay = f"{g.id}.replay"
+        games.append(g)
+    assert retention.compress_existing(arena) == 4
+    assert all(retention.is_gzip(arena.cfg.replays / g.replay) for g in games)
+    arena.cfg.raw["retention"] = {"replay_cap_gb": 2.5e-5}             # ~27 KB: forces pruning
+    retention.prune(arena)
+    assert games[1].replay is not None                                  # server replay kept
+    assert games[0].replay is None and not (arena.cfg.replays / "1.replay").exists()
