@@ -28,3 +28,10 @@ replay_cap_gb = 40
 [api]
 host = "100.0.0.0"          # the tailnet address
 port = 8700
+
+[server]
+mode = "approve"            # auto | approve | off
+min_hours = 4               # between submissions
+quota_share = 30            # of the site's 60 games an hour; the rest is for teammates
+head_to_head_min = 0.55     # candidate vs live bot, over at least 60 games
+cpu_p99_max = 70_000_000    # points per turn (cap is 100M)
