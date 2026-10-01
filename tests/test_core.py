@@ -52,8 +52,9 @@ def test_rejects_bad_zips(arena):
 
 
 def test_duplicate_returns_original(arena):
-    a, new = submit.accept(arena, blob=make_zip(BOT), bot="x", owner="a")
-    b, again = submit.accept(arena, blob=make_zip(BOT), bot="y", owner="b")
+    blob = make_zip(BOT)                  # one zip: zips stamp the time, so two builds can differ
+    a, new = submit.accept(arena, blob=blob, bot="x", owner="a")
+    b, again = submit.accept(arena, blob=blob, bot="y", owner="b")
     assert new and not again and a.id == b.id
 
 
