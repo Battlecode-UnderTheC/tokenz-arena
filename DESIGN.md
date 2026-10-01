@@ -298,6 +298,8 @@ of them reading at once cost the server one cached request.
 | `GET /api/v1/server/tournaments`, `/tournaments/{id}` | Tournaments and brackets round by round, with each game's map and winner, and our matches marked | API `/tournaments` + `bcweb bracket` |
 | `GET /api/v1/server/queue` | The judge's capacity and queue length | API `/queue` |
 | `POST /api/v1/server/pause`, `/resume` | Pause or resume auto-submit. Logged with who | arena |
+| `GET /api/v1/server/gate` | The champion gate evaluated now: candidate, each check with its evidence, what blocks an upload | arena |
+| `GET /api/v1/server/log?action=` | The bridge's action log (uploads, held-back candidates, pauses, challenges) | arena |
 
 Replays of server and tournament games are arena games (below), so they're served by
 `/api/v1/games/{id}/replay` and watchable in the browser viewer like any other.
@@ -332,7 +334,9 @@ On a 429 the cached copy is served with `"stale": true`. The bridge's own backgr
   game with `suite = 'server'`:
   - our seat holds the arena submission that was live;
   - the other seat holds the external bot `server:<team name>`;
-  - every server game opens in the browser viewer and gets the same stats as local games.
+  - every server game opens in the browser viewer and gets the stats local games get, read
+    from the replay (verdict, deaths by cause, moves, sprints, splits, sonars, dragons over
+    time, tiebreak), except CPU points, which only the judge's log has.
 - **The server suite.** Every map and seed seen in a server game joins a `server` map suite.
   Map text comes from `GET /maps`, or from the replay for maps no longer in play. The champion
   gate plays candidates there, so a bot that only wins on our maps doesn't go live (the v9
@@ -345,6 +349,26 @@ On a 429 the cached copy is served with `"stale": true`. The bridge's own backgr
 - quota left;
 - the current candidate and why it is or isn't going up;
 - the upload history.
+
+**5. What the real API looks like** (checked read-only, 2026-10-01):
+- A battle is a series. `GET /battles` lists series, and a series' id is its first game's id.
+  Every game has its own id, and `GET /battles/<game id>` gives that game's `seed` (hex), `log`
+  and slot winner. The replay is per game (`/battles/<game id>/replay`), gzip-compressed;
+  uncompressed it's the same format the judge writes locally.
+- Battles don't say which of our submissions played. The replay does: its `botA`/`botB` hold
+  our server submission id on our side (the opponent's is blank). Slots `a`/`b` aren't replay
+  seats, so the seat comes from the replay too. The bridge maps that id to an arena
+  submission through `server/versions.json`, or a server `sourceHash` equal to an arena
+  upload's sha256; otherwise the game is credited to a stand-in `server-version:<id>`.
+- The key API only says `ranked` true or false; "scrim" and "auto" are only on the website.
+- The quota (`bcweb` availability) is per target team (dev teams have their own pool).
+- Tournaments have numeric ids in the API and slug ids (`sprint`) on the website; per-game
+  maps of a bracket come only from the website.
+- `GET /queue` can be slow (it once took over 60 s). `GET /me` returns the key's prefix, so
+  it's never passed through.
+- Server-suite map files are named by slug (`Queen Of Spades` -> `queen_of_spades.map`), and
+  arena games use that stem as `map`. Seeds are per map: `server/seeds.json` holds
+  `{stem: [seeds]}`, first seen first.
 
 **Secrets.** The bridge needs, on poscatgpu2, mode 600 and outside the data directory:
 - one member's key from the site's Team page (today `~/.unswbc/keys.json` on the Mac);
