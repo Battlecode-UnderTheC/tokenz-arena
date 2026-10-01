@@ -24,6 +24,7 @@ log "deploying $(git log -1 --format='%h %s')"
 
 mkdir -p "$ARENA_DATA" "$ARENA_CACHE" "$ARENA_SECRETS"
 [ -f "$ARENA_DATA/arena.toml" ] || cp deploy/arena.poscatgpu2.toml "$ARENA_DATA/arena.toml"
+old=$(docker image inspect tokenz-arena:latest -f '{{.Id}}' 2>/dev/null || true)
 docker compose build -q engine          # web runs the same image
 # Smoke test on the bare image (no network: the compose service shares the sidecar's).
 docker run --rm --network none tokenz-arena:latest \
@@ -32,4 +33,8 @@ docker rm -f tokenz-arena-arena-1 >/dev/null 2>&1 || true   # the old single-pro
 docker compose up -d tailscale   # first, so the others have a namespace to join
 docker compose up -d --remove-orphans
 echo "$want" > "$stamp"
+# Remove the image this deploy replaced (only ours: the previous tokenz-arena:latest), so
+# deploys don't pile up images on a Docker shared with other people.
+new=$(docker image inspect tokenz-arena:latest -f '{{.Id}}')
+if [ -n "$old" ] && [ "$old" != "$new" ]; then docker rmi "$old" >/dev/null 2>&1 || true; fi
 log "deployed $(git rev-parse --short HEAD)"
