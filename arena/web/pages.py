@@ -8,8 +8,10 @@ All user-provided text (notes, names, owners, URLs) goes through `e()` (html.esc
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
+import threading
 import time
 from html import escape
 from urllib.parse import quote, urlencode
@@ -179,7 +181,7 @@ def layout(title: str, body: str, json_url: str | list[str] | None = None,
 <main>
 {body}
 </main>
-<footer>{"JSON: " + foot + " · " if foot else ""}<a href="/llms.txt">/llms.txt</a> ·
+<footer>Times are {TZ_LABEL} (UTC{TZ_HOURS:+d}). {"JSON: " + foot + " · " if foot else ""}<a href="/llms.txt">/llms.txt</a> ·
 <a href="/api/docs">API docs</a></footer>
 </body>
 </html>"""
@@ -188,13 +190,31 @@ def layout(title: str, body: str, json_url: str | list[str] | None = None,
 
 # ---------------------------------------------------------------------------- small pieces
 
+TZ_HOURS = 9           # times are shown in UTC+9 (KST); set from [api] utc_offset_hours
+TZ_LABEL = "KST"
+
+
+def local_time(ts: str | None) -> str:
+    """'2026-10-01T15:55:12Z' (any ISO form) -> '2026-10-02 00:55' in the site's time zone."""
+    if not ts:
+        return ""
+    try:
+        t = dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return str(ts).replace("T", " ")[:16]
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt.timezone.utc)
+    return t.astimezone(dt.timezone(dt.timedelta(hours=TZ_HOURS))).strftime("%Y-%m-%d %H:%M")
+
+
 def when(ts: str | None) -> str:
     if not ts:
         return ""
-    return f'<span title="{e(ts)}">{e(ts.replace("T", " ")[:16])}</span>'
+    return f'<span title="{e(ts)} (UTC)">{e(local_time(ts))}</span>'
 
 
 _VERSIONS: dict = {"at": 0.0, "names": {}}
+_SERVER_CACHE: dict = {"data": None, "busy": False, "lock": threading.Lock()}
 
 
 def server_version_names(arena: Arena) -> dict[str, str]:
@@ -429,6 +449,9 @@ def json_attr(value) -> str:
 # ---------------------------------------------------------------------------- router
 
 def make_router(arena: Arena) -> APIRouter:
+    global TZ_HOURS, TZ_LABEL
+    TZ_HOURS = int(arena.cfg.get("api", "utc_offset_hours", 9))
+    TZ_LABEL = arena.cfg.get("api", "time_zone_label", "KST" if TZ_HOURS == 9 else f"UTC{TZ_HOURS:+d}")
     r = APIRouter(include_in_schema=False)
 
     def get_sub(sid: str):
@@ -1099,8 +1122,30 @@ f.onsubmit = async (ev) => {{
         return layout("Queue", body, "/api/v1/queue", "/queue")
 
     # ------------------------------------------------------------ competition server
+    def fetch_server(b, server_routes) -> dict:
+        """The slow part (several competition-server requests): summary and recent battles."""
+        try:
+            d = b.summary()
+        except Exception as ex:
+            d = {"status": f"error: {ex}"}
+        try:
+            rows_, _ = b.client.battles(25)
+            battles = [server_routes._battle_row(x, b.battle_summary(x["id"]))
+                       for x in (rows_ if isinstance(rows_, list) else [])[:25]]
+        except Exception:
+            battles = []
+        return {"summary": d, "battles": battles, "at": time.time()}
+
+    def refresh_server(b, server_routes):
+        try:
+            data = fetch_server(b, server_routes)
+            with _SERVER_CACHE["lock"]:
+                _SERVER_CACHE["data"] = data
+        finally:
+            _SERVER_CACHE["busy"] = False
+
     @r.get("/server", response_class=HTMLResponse)
-    def server_page(request: Request):
+    def server_page(request: Request, refresh: bool = False):
         try:
             from arena.server import bridge as bridge_mod, routes as server_routes
             b = bridge_mod.get(arena)
@@ -1110,10 +1155,18 @@ f.onsubmit = async (ev) => {{
             body = ('<h1>Competition server</h1><div class="flash">The server bridge isn\'t '
                     'configured on this arena (no server key), so there\'s nothing to show.</div>')
             return layout("Server", body, "/api/v1/server", "/server")
-        try:
-            d = b.summary()
-        except Exception as ex:
-            d = {"status": f"error: {ex}"}
+        # Served from a cache so the page is instant; a stale cache (older than a minute) is
+        # refreshed in the background, and the Refresh button fetches fresh data now.
+        cached = _SERVER_CACHE["data"]
+        if refresh or cached is None:
+            cached = fetch_server(b, server_routes)
+            with _SERVER_CACHE["lock"]:
+                _SERVER_CACHE["data"] = cached
+        elif time.time() - cached["at"] > 60 and not _SERVER_CACHE["busy"]:
+            _SERVER_CACHE["busy"] = True
+            threading.Thread(target=refresh_server, args=(b, server_routes), daemon=True).start()
+        d = cached["summary"]
+        age = int(time.time() - cached["at"])
         team, live = d.get("team") or {}, d.get("live") or {}
         auto, quota = d.get("auto_submit") or {}, d.get("quota") or {}
         cand = auto.get("candidate") or {}
@@ -1153,14 +1206,7 @@ f.onsubmit = async (ev) => {{
                 f' <span class="muted">(checked {when(cand.get("at"))})</span></p>'
                 + (f'<ul>{"".join(f"<li>{e(x)}</li>" for x in failed)}</ul>' if failed else "")
                 + (table(["", "check", "evidence"], check_rows) if check_rows else ""))
-        try:
-            battles = server_routes._battle_rows(arena, b, 25) if hasattr(server_routes, "_battle_rows") else None
-        except Exception:
-            battles = None
-        if battles is None:
-            rows_, _ = b.client.battles(25)
-            battles = [server_routes._battle_row(x, b.battle_summary(x["id"]))
-                       for x in (rows_ if isinstance(rows_, list) else [])[:25]]
+        battles = cached["battles"]
         brows = []
         for x in battles:
             res = x.get("result") or "pending"
@@ -1179,7 +1225,9 @@ f.onsubmit = async (ev) => {{
         up_rows = [[when(u.get("at")), sub_link(arena, u.get("arena")), e(u.get("server_version")),
                     e(u.get("status") or u.get("result") or "")] for u in ups]
         dl = d.get("downloads") or {}
-        body = f"""<h1>Competition server <span class="src comp">COMPETITION</span></h1>
+        body = f"""<h1>Competition server <span class="src comp">COMPETITION</span>
+<span class="sub" style="font-weight:400">updated {age}s ago</span>
+<a href="/server?refresh=1"><button class="small">refresh</button></a></h1>
 <p class="sub">Our team on <a href="{e(d.get("server") or "https://game.battlecode.au")}">game.battlecode.au</a>.
 These are real battles, played by our live bot against other teams. Arena games (our own judge)
 are on the <a href="/games">Games</a> page.{' <b>Cached copy</b>: the server rate-limited us.' if d.get("stale") else ''}</p>

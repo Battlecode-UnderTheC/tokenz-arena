@@ -25,6 +25,7 @@ replay_days = 14
 replay_cap_gb = 40
 
 [api]
+utc_offset_hours = 9         # times on the website (KST)
 host = "100.0.0.0"          # the tailnet address
 port = 8700
 

@@ -130,6 +130,20 @@ def table(rows: list[list], headers: list[str]):
         print("  ".join(c.ljust(w[i]) for i, c in enumerate(r)).rstrip())
 
 
+def kst(ts) -> str:
+    """An ISO UTC time as UTC+9 (KST), the team's time zone: '2026-10-02 00:55 KST'."""
+    import datetime as dt
+    if not ts:
+        return ""
+    try:
+        t = dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return str(ts)[:16]
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt.timezone.utc)
+    return t.astimezone(dt.timezone(dt.timedelta(hours=9))).strftime("%Y-%m-%d %H:%M KST")
+
+
 def wdl(r: dict) -> str:
     return f"{r.get('W', 0)}-{r.get('D', 0)}-{r.get('L', 0)}"
 
@@ -456,7 +470,7 @@ def cmd_server(args):
     elif args.what == "versions":
         emit(args, get(args, "/api/v1/server/submissions"), lambda rows: table(
             [[r["server_version"], r["name"], "live" if r.get("live") else "", r.get("arena") or "-",
-              r.get("uploaded", "")[:16]] for r in rows],
+              kst(r.get("uploaded"))] for r in rows],
             ["version", "name", "", "arena", "uploaded"]))
     else:
         emit(args, get(args, "/api/v1/server"))
