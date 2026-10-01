@@ -94,7 +94,7 @@ POST zip --> api --> checks --> submissions/<id>/{meta.json, source.zip}
 | `arena/daemon.py` | The background part of `arena serve`: schedule, play, rate. |
 | `arena/api/http.py` | The HTTP API (the one write is submitting) and `/llms.txt`. |
 | `arena/api/mcp.py` | The same as MCP tools. |
-| `arena/server/proxy.py` | `/unswbc/api/v1/*`: the toolkit-compatible API, with uploads as arena submissions, cached pass-through for the rest, and activate refused. |
+| `arena/server/client.py` | The competition server: the key API, plus the `bcweb` package (`Battlecode-UnderTheC/bcweb`) for what only the website has (quota, per-map detail, brackets); cached. |
 | `arena/server/bridge.py` | Auto-submit behind the champion gate, auto-download of battles and replays, the server suite (section 8). |
 | `arena/who.py` | Who's calling: the teammate's tailnet login, from Tailscale (section 1). |
 | `arena/cli.py` | `arena serve`, `arena status`, `arena play`, `arena server <status\|pause\|resume>`. |
@@ -141,9 +141,8 @@ POST /api/v1/submissions          (no auth: the caller is known from Tailscale)
 
   The login becomes the submission's `owner`. Teammates and their agents need no setup:
   whatever runs on Alice's laptop submits as Alice.
-  - **Agent label:** an optional `agent` field (or, for the toolkit, the value given to
-    `unswbc auth set`, which it sends as the bearer token) labels which of a teammate's
-    agents submitted. It shows next to the owner (`alice / worker-3`) and lets a teammate
+  - **Agent label:** an optional `agent` field labels which of a teammate's agents
+    submitted. It shows next to the owner (`alice / worker-3`) and lets a teammate
     filter their own loop's submissions. It's a label, not a secret.
   - **Shared machines:** tagged devices (a server running someone's agents, poscatgpu2
     itself) have no user login. Their submissions are owned by the device name (`tag:ci /
@@ -233,15 +232,15 @@ page for agents.
 | `GET /api/v1/games/{id}/replay` | The replay file. |
 | `GET /api/v1/stats/maps` | Per map: games, how they end, first-seat advantage. |
 | `GET /api/v1/queue` | What's playing and waiting, by lane and owner. |
-| `GET /api/v1/server` | The server bridge's state (section 8). |
-| `POST /api/v1/server/pause`, `/resume` | Pause or resume auto-submit. Recorded with who did it. |
-| `/unswbc/api/v1/*` | The competition server's API, proxied (section 8). Point `UNSWBC_SERVER` here. |
+| `GET /api/v1/server/*` | The competition server: summary, ladder, our submissions and battles, challenges, quota, maps, tournaments (section 8). |
 | `GET /health` | Daemon heartbeat, workers, unswbc version, disk free. |
 | `GET /llms.txt` | A plain-text guide to all of the above. |
 
 **MCP** (`/mcp`, streamable HTTP) wraps the same endpoints as tools: `submit` (takes a
 directory path or base64 zip), `submission`, `wait`, `promote`, `report`, `leaderboard`,
-`ideas`, `games`, `game`, `map_stats`, `queue`, `server_status`.
+`ideas`, `games`, `game`, `map_stats`, `queue`, and `server_*` tools for section 8
+(`server_status`, `server_battles`, `server_battle`, `server_leaderboard`, `server_team`,
+`server_quota`, `server_challenge`, `server_tournament`).
 
 ## 7. The website (for people)
 
@@ -272,46 +271,47 @@ checked in headless Chrome on a real replay: board, playback, timeline and the v
 per-team stats (deaths by kind, splits, sprints). The same bundle also has a map view
 (`data-view="map"`) for the map previews.
 
-## 8. The server bridge: a proxy to the competition server
+## 8. The server bridge (competition server)
 
-The competition server has a documented JSON API (`https://game.battlecode.au/api/v1`,
-`Authorization: Bearer <member key>`, 120 requests a minute per key). The `unswbc` toolkit
-talks to whatever server `UNSWBC_SERVER` names. So the arena serves that same API at
-`/unswbc/api/v1/*` and is, to teammates, just the competition server with an arena in front.
-Three behaviours:
+The arena is the team's one window on the competition server. It doesn't pass requests
+through. It talks to the server itself, with one member's key on the documented API
+(`/api/v1`, 120 requests a minute per key) and our `bcweb` client for what only the website
+has. It then serves the results as its own endpoints under `/api/v1/server/*`, in the
+arena's conventions: small flat JSON, our side already worked out, and server games linked
+to arena submissions and replays. Teammates and their agents never see the key, and dozens
+of them reading at once cost the server one cached request.
 
-**1. Proxy.** Requests the arena doesn't handle itself are forwarded to the real server
-with the team's key. Teammates send no credentials (any bearer value is just their agent
-label), the team key goes out, and the key never leaves poscatgpu2.
-- **Reads** (`/me`, `/team`, `/submissions`, `/battles`, `/leaderboard`, `/ratings`,
-  `/teams`, `/tournaments`, `/maps`, `/queue`) are cached: leaderboard and ratings for 60 s,
-  battles for 15 s, finished battles and replays forever. One key serves the whole team,
-  so the cache is what keeps dozens of agents under 120 requests a minute (30 for
-  leaderboard and ratings). On a 429 the proxy serves the cached copy, marked stale.
-- **Challenges** (`POST /battles`) pass through. The site's 60-games-an-hour limit is the
-  team's, and the proxy reports what's left in a response header.
-- **Activate** (`POST /submissions/:id/activate`) is refused through the proxy. Only the
-  bridge changes the live bot.
-- **Uploads** (`POST /submissions`) aren't forwarded: they're arena submissions (below).
+**1. What it exposes.** The union of what the official API gives and what `bcweb` adds:
 
-**2. Submit to the arena with the toolkit.** For a teammate's agent, submitting is:
+| Endpoint | Returns | Comes from |
+|---|---|---|
+| `GET /api/v1/server` | Summary: live bot (server version and arena id), rank, rating, record, quota left, auto-submit state and candidate | both |
+| `GET /api/v1/server/leaderboard?page=` | The ladder, with our row marked | API `/leaderboard` |
+| `GET /api/v1/server/ratings?team=` | Rating history, ours or a team's | API `/ratings` |
+| `GET /api/v1/server/teams/{team}` | A team's profile and recent battles. `{team}` is an id, a name (unique prefix) or `#rank` | API `/teams/:id` |
+| `GET /api/v1/server/submissions` | Our versions on the server: W-D-L, per-map record, which arena submission each one is, which is live | API `/submissions` + `bcweb submissions --maps` |
+| `GET /api/v1/server/battles?kind=&opponent=&result=&limit=` | Our battles: opponent and rating, kind (ranked, unranked, scrim, auto), our side, W-L, rating change, per-game map and result, queue position if unplayed | API `/battles` + `bcweb battles --maps` |
+| `GET /api/v1/server/battles/{id}` | One battle: each game's map, seats, winner, end reason, totals, the crash or timeout `log`, and the arena game id (for stats and the viewer) | API `/battles/:id` |
+| `POST /api/v1/server/battles` | Challenge: `{team, ranked, maps}`. Checks the quota first and refuses with the minutes until it frees up. Logged with who asked | API `POST /battles` |
+| `GET /api/v1/server/quota` | Games left this hour, when more free up, and recent challenges with who started them | `bcweb quota` (site availability) |
+| `GET /api/v1/server/maps` | The maps in play, with their text and arena per-map stats | API `/maps` |
+| `GET /api/v1/server/tournaments`, `/tournaments/{id}` | Tournaments and brackets round by round, with each game's map and winner, and our matches marked | API `/tournaments` + `bcweb bracket` |
+| `GET /api/v1/server/queue` | The judge's capacity and queue length | API `/queue` |
+| `POST /api/v1/server/pause`, `/resume` | Pause or resume auto-submit. Logged with who | arena |
 
-```sh
-export UNSWBC_SERVER=http://<arena>.<tailnet>.ts.net:8700/unswbc
-unswbc auth set worker-3          # the toolkit insists on a key; here it's just an agent label
-unswbc submit mybot -n swarm \
-  -d "parent=swarm-6; source=https://github.com/<org>/<repo>/tree/<sha>/bots/swarm; lunge at enemy heads"
-```
+Replays of server and tournament games are arena games (below), so they're served by
+`/api/v1/games/{id}/replay` and watchable in the browser viewer like any other.
 
-The toolkit's upload (fields `name`, `language`, `description`, `zip`) becomes an arena
-submission:
-- `name` is the bot;
-- `description` is the note. Leading `key=value;` pairs set fields: `parent=<id>;` and
-  `source=<url>;`;
-- the reply has the toolkit's shape (`version`, `status`), so the toolkit prints it as usual.
+Deliberately not exposed: activating a submission (only auto-submit changes the live bot),
+uploading to the server (same), and anything touching team settings or keys.
 
-`unswbc run` stays local, and nothing else changes for the teammate. The arena's own
-`POST /api/v1/submissions` (section 1) does the same thing for scripts and MCP.
+**2. Caching and limits.** One key serves the whole team, so every read is cached:
+- leaderboard and ratings for 60 s (the server allows 30 a minute for those);
+- battles and quota for 15 s;
+- finished battles, replays and past tournaments forever.
+
+On a 429 the cached copy is served with `"stale": true`. The bridge's own background polling
+(below) keeps the common reads warm, so most requests never reach the server.
 
 **3. Auto-submit and auto-download.**
 - **Auto-submit.** When an arena submission passes the champion gate, the bridge uploads it
@@ -338,7 +338,7 @@ submission:
   gate plays candidates there, so a bot that only wins on our maps doesn't go live (the v9
   lesson).
 
-**Exposed** on `/server` (website), `GET /api/v1/server` and MCP `server_status`:
+**4. The `/server` page** shows people the same, on one page:
 - the live bot and its arena id;
 - rank and rating over time;
 - battles with per-map results and "watch" links;
@@ -346,12 +346,13 @@ submission:
 - the current candidate and why it is or isn't going up;
 - the upload history.
 
-**Secrets.** The bridge needs one member's key from the site's Team page (today
-`~/.unswbc/keys.json` on the Mac) on poscatgpu2, mode 600, outside the data directory.
-It's read only by the bridge, never logged or served. Everything done through it is
-recorded on the site under that member's name. Copying it there is the user's step. The
-web login and `bcweb.py` are no longer needed: the key API covers battles, replays,
-challenges and tournaments.
+**Secrets.** The bridge needs, on poscatgpu2, mode 600 and outside the data directory:
+- one member's key from the site's Team page (today `~/.unswbc/keys.json` on the Mac);
+- the website login `bcweb` uses (`~/.unswbc-web/credentials`), for quota, per-map detail
+  and brackets.
+
+Only the bridge reads them, and it never logs or serves them. Everything done with them
+is recorded on the site under that member's name. Copying them there is the user's step.
 
 ## 9. Deployment on poscatgpu2
 
@@ -377,8 +378,8 @@ challenges and tournaments.
 6. MCP.
 7. Deploy on poscatgpu2 behind `tailscale serve`; seed it with our best bots.
 8. Holdout, continuous matches, retention, the remaining web pages.
-9. The server bridge, in this order: the read proxy and auto-download (read-only); toolkit
-   uploads as arena submissions; the server suite; auto-submit. The key goes on poscatgpu2 by
+9. The server bridge, in this order: the read endpoints and auto-download (read-only);
+   the server suite; challenges; auto-submit. The key and the web login go on poscatgpu2 by
    hand.
 10. `docs/AGENTS.md`: the brief for teammates' agents (the loop above, with curl examples).
 
@@ -388,5 +389,5 @@ challenges and tournaments.
   measured cost of a game.
 - Should `promote` require beating the parent, or is it the owner's call?
 - Should the bridge also spend quota on its own (ranked battles to climb), or leave all
-  challenges to teammates through the proxy?
+  challenges to teammates (`POST /api/v1/server/battles`)?
 - Should our syeyoung-tokens variants enter through `make-bot.sh` exports, as one bot each?
