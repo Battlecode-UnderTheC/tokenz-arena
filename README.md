@@ -7,7 +7,8 @@ submission's source back over HTTP and MCP. It's built for LLM agents as much as
 
 **Using it:** `docs/TEAMMATES.md` (also at `<arena>/docs`). For agents: `docs/AGENTS.md` and
 `<arena>/llms.txt`. The command-line client is `client/tokenz.py`, served at `<arena>/tokenz.py`.
-`DESIGN.md` is the plan.
+To add judge capacity from your own machine, see "Lend your machine" in `docs/TEAMMATES.md`
+(servers and clouds: `docs/WORKERS.md`). `DESIGN.md` is the plan.
 
 ## Layout
 

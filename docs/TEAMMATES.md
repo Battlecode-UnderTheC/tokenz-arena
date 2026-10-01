@@ -187,7 +187,56 @@ upload and refuses maps it can't load.
 - **Challenges:** `POST /api/v1/server/battles` (or the Server page) starts one. It checks
   the team's 60-games-an-hour quota first, and it logs who asked.
 
-## 8. Rules and limits
+## 8. Lend your machine (run a judge)
+
+Games run on poscatgpu2, and any machine can add capacity: it asks the arena for games, plays
+them with the official judge, and sends the results back. Results are identical wherever a game
+runs. Start and stop it whenever you like: games it was playing when it stopped just go back in the
+queue.
+
+**What you need**
+
+- **Tailscale, connected** (you already have it if you can open the arena).
+- **A worker token:** the password a judge sends with every request, so only our machines can
+  hand in results (they move ratings). Ask syeyoung for one; each person can have their own, so
+  the Queue page shows whose machine played what.
+
+**Without Docker** (macOS or Linux):
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh            # if you don't have uv
+git clone git@github.com:Battlecode-UnderTheC/tokenz-arena.git && cd tokenz-arena
+uv sync                                                    # Python 3.12 and the pinned judge
+ARENA_WORKER_TOKEN=<your token> uv run arena worker --slots 6
+```
+
+**With Docker:**
+
+```sh
+docker run --rm -e ARENA_WORKER_TOKEN=<your token> -e ARENA_SLOTS=6 \
+  -v tokenz-worker-cache:/home/arena/.cache \
+  ghcr.io/battlecode-underthec/tokenz-arena:latest worker
+```
+
+The image is private: `docker login ghcr.io` first, with a GitHub token that has `read:packages`.
+If the container can't reach the arena through your Tailscale, add `-e TS_AUTHKEY=<worker key>`
+(ask syeyoung): the container then joins the tailnet itself, as a worker that can reach the arena
+and nothing else.
+
+**Good to know**
+
+- **Slots** = games at once. A heavy game uses about 3 cores, so about cores ÷ 2 on a machine you
+  aren't using, fewer on a laptop you're working on.
+- **The first few minutes are slower:** the judge prepares its toolchain and compiles each C++ bot
+  once per machine. It's cached in `~/.cache`, so later runs start fast.
+- **Stop:** Ctrl-C (or `docker stop -t 600 …`). It finishes the games it's playing, then exits.
+- **It's working** when the log says `lease …: recorded`. Your machine also appears on the
+  [Queue]({ARENA}/queue) page with its slots and games played.
+- **Update** with `git pull && uv sync` (or `docker pull`). A judge on a different unswbc version
+  than the arena is refused, with a message saying which version to use.
+- **Servers, AWS Batch, Kubernetes:** see `docs/WORKERS.md`.
+
+## 9. Rules and limits
 
 - Bots must **not read environment variables** (`os.environ`, `getenv`). The competition
   forbids it and the arena rejects it.
@@ -199,7 +248,7 @@ upload and refuses maps it can't load.
 - Always name a `--parent` when you build on something, and write a real note: the
   hypothesis and the change. That's what makes Ideas useful.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Problem | What to do |
 |---|---|
