@@ -16,7 +16,8 @@ order in `DESIGN.md`.
 | `arena/store.py` | JSON files, one per record, atomic writes. No database. |
 | `arena/submit.py`, `scheduler.py`, `stats.py`, `rating.py`, `report.py`, `daemon.py` | Submission checks, scheduling, stats, ratings, reports, the worker loop (stubs). |
 | `arena/api/http.py`, `arena/api/mcp.py` | The HTTP API and MCP tools (stubs). |
-| `arena/web/viewer.py` | The toolkit's replay viewer in a plain browser page (working). |
+| `arena/web/viewer.py` | The toolkit's replay viewer (and its map view) in a plain browser page (working). |
+| `arena/web/pages.py` | The website: leaderboard, bots, submissions, games with the viewer, maps, ideas, submit, queue, server. Server-rendered from the same data functions as the API; each page links its JSON twin. |
 | `arena/cli.py` | The `arena` command. |
 | `maps/official/` | The official maps. The holdout pool lives only in the data directory. |
 | `Dockerfile`, `compose.yaml`, `deploy/` | The container, its Tailscale sidecar, and pull-based CD on poscatgpu2 (`update.sh` + a systemd user timer). |

@@ -65,9 +65,28 @@ def extract(dest: Path) -> Path:
     return dest
 
 
-def page(replay_url: str, name: str, assets: str = "/viewer") -> str:
-    """The viewer page for one replay. `assets` is where webview.js and .css are served."""
-    open_msg = json.dumps({"type": "open", "name": name, "url": replay_url})
+def _js(value) -> str:
+    """JSON safe to put inside a <script> element."""
+    return json.dumps(value).replace("</", "<\\/")
+
+
+def page(replay_url: str, name: str, assets: str = "/viewer", header: str = "",
+         head: str = "") -> str:
+    """The viewer page for one replay. `assets` is where webview.js and .css are served.
+    `header` is HTML for a bar above the viewer (the website's game page) and `head` extra
+    markup for <head> (its styles)."""
+    return _shell(name, assets, "replay",
+                  _js({"type": "open", "name": name, "url": replay_url}), header, head)
+
+
+def map_page(text: str, name: str, assets: str = "/viewer", header: str = "",
+             head: str = "") -> str:
+    """The bundle's map view (the toolkit's map editor) showing one map, for map previews."""
+    return _shell(name, assets, "map", _js({"type": "map", "text": text}), header, head)
+
+
+def _shell(name: str, assets: str, view: str, reply: str, header: str, head: str) -> str:
+    """The page around the bundle: answers its {type: "ready"} with `reply`."""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -79,16 +98,18 @@ def page(replay_url: str, name: str, assets: str = "/viewer") -> str:
 :root {{{_THEME}}}
 html, body {{ margin: 0; height: 100%; background: var(--vscode-editor-background);
   color: var(--vscode-foreground); font-family: var(--vscode-font-family); }}
-#app {{ height: 100%; }}
+body {{ display: flex; flex-direction: column; }}
+#app {{ flex: 1; min-height: 0; }}
 </style>
+{head}
 <script>
 window.acquireVsCodeApi = () => ({{
-  postMessage(m) {{ if (m && m.type === "ready") window.postMessage({open_msg}, "*"); }},
+  postMessage(m) {{ if (m && m.type === "ready") window.postMessage({reply}, "*"); }},
   getState() {{ return undefined; }},
   setState() {{}},
 }});
 </script>
 </head>
-<body><div id="app" data-view="replay"></div><script src="{assets}/webview.js"></script></body>
+<body>{header}<div id="app" data-view="{view}"></div><script src="{assets}/webview.js"></script></body>
 </html>
 """
