@@ -71,12 +71,39 @@ def _js(value) -> str:
 
 
 def page(replay_url: str, name: str, assets: str = "/viewer", header: str = "",
-         head: str = "") -> str:
+         head: str = "", team_names: dict | None = None) -> str:
     """The viewer page for one replay. `assets` is where webview.js and .css are served.
     `header` is HTML for a bar above the viewer (the website's game page) and `head` extra
-    markup for <head> (its styles)."""
+    markup for <head> (its styles). `team_names` ({"A": ..., "B": ...}) relabels the viewer's
+    "Team A" / "Team B" with real names (the bundle only knows seats)."""
+    if team_names:
+        head += _relabel(team_names)
     return _shell(name, assets, "replay",
                   _js({"type": "open", "name": name, "url": replay_url}), header, head)
+
+
+def _relabel(names: dict) -> str:
+    """Rewrites "Team A"/"Team B" in the viewer's text as it renders (a MutationObserver over
+    text nodes), keeping the seat letter: "Team A" -> "us · v12 (A)"."""
+    pairs = {f"Team {k}": f"{v} ({k})" for k, v in names.items() if v}
+    return f"""<script>
+(() => {{
+  const pairs = {_js(pairs)};
+  const re = /Team [AB]/g;
+  const fix = (n) => {{
+    if (n.nodeType === 3) {{
+      if (re.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(re, (m) => pairs[m] || m);
+      re.lastIndex = 0;
+    }} else if (n.nodeType === 1 && n.tagName !== "SCRIPT") {{
+      for (const c of n.childNodes) fix(c);
+    }}
+  }};
+  new MutationObserver((ms) => ms.forEach((m) => {{
+    if (m.type === "characterData") fix(m.target); else m.addedNodes.forEach(fix);
+  }})).observe(document.documentElement, {{subtree: true, childList: true, characterData: true}});
+  document.addEventListener("DOMContentLoaded", () => fix(document.body));
+}})();
+</script>"""
 
 
 def map_page(text: str, name: str, assets: str = "/viewer", header: str = "",

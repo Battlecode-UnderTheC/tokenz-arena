@@ -28,7 +28,8 @@ class Daemon:
         self.arena = arena
         cfg = arena.cfg
         self.workers = int(cfg.get("play", "workers", 4))
-        self.pool = ThreadPoolExecutor(self.workers, thread_name_prefix="judge")
+        # workers = 0: a read-only arena (serves and imports, never plays or checks)
+        self.pool = ThreadPoolExecutor(max(1, self.workers), thread_name_prefix="judge")
         self.checking: set[str] = set()
         self.tasks: list[tuple[float, Callable[[], None], str]] = []   # (period s, fn, name)
         self.last_run: dict[str, float] = {}

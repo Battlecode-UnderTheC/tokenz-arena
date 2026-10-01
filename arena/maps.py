@@ -39,6 +39,37 @@ EPOCH_START = 1767225600          # 2026-01-01T00:00:00Z
 HOLDOUT_MAPS = 60
 
 
+_NAMES: dict = {}
+
+
+def map_name(p: Path) -> str:
+    """A map's MAP_NAME (normalised), cached by file and mtime; the file stem if it has none."""
+    key = (p, p.stat().st_mtime)
+    if key not in _NAMES:
+        name = p.stem
+        with p.open(errors="replace") as f:
+            for _, line in zip(range(8), f):
+                if line.startswith("MAP_NAME"):
+                    name = line.split(None, 1)[1] if len(line.split(None, 1)) > 1 else name
+                    break
+        _NAMES[key] = " ".join(name.lower().replace("_", " ").split())
+    return _NAMES[key]
+
+
+def suite_files(cfg: Config, suite: str) -> list[Path]:
+    """The maps of one suite, without duplicates across suites: the `server` suite (the
+    competition's maps in play, with its real dragon placement) supersedes the official copy
+    of the same map, so `official` keeps only the official maps the server doesn't play."""
+    dirs = [cfg.map_dir(suite)]
+    if suite == "holdout":                      # generated + hidden team uploads
+        dirs.append(cfg.map_dir("holdout_custom"))
+    files = sorted(p for d in dirs if d and d.is_dir() for p in d.glob("*.map"))
+    if suite == "official":
+        server = {map_name(p) for p in suite_files(cfg, "server")}
+        files = [p for p in files if map_name(p) not in server]
+    return files
+
+
 def epoch(now: float | None = None) -> int:
     return int(((now or time.time()) - EPOCH_START) // (EPOCH_DAYS * 86400))
 

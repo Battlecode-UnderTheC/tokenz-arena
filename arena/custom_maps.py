@@ -113,9 +113,9 @@ def listing(arena: Arena) -> list[dict]:
     """Every public map by suite; hidden uploads only as a count, never by name."""
     m = meta(arena)
     out = []
-    for suite in ("official", "tournament", "server", "custom", "rotating"):
-        d = arena.cfg.map_dir(suite)
-        for p in sorted(d.glob("*.map")) if d and d.is_dir() else []:
+    from arena.maps import suite_files
+    for suite in ("server", "official", "tournament", "custom", "rotating"):
+        for p in suite_files(arena.cfg, suite):
             row = {"suite": suite, "name": p.stem, "preview": f"/maps/{suite}/{p.stem}"}
             if suite == "custom" and p.stem in m:
                 row.update({k: m[p.stem][k] for k in ("owner", "note", "created", "size")})

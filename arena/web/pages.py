@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from html import escape
 from urllib.parse import quote, urlencode
 
@@ -35,6 +36,12 @@ def q(x) -> str:
 
 
 # ---------------------------------------------------------------------------- layout
+
+SRC_CSS = """
+.src { display: inline-block; padding: 0 5px; border-radius: 3px; font-size: 10px; font-weight: 700;
+  letter-spacing: .04em; line-height: 16px; vertical-align: 1px; }
+.src.comp { background: #d18616; color: #111; } .src.arena { background: #2f6fd6; color: #fff; }
+"""
 
 CSS = """
 :root {
@@ -84,6 +91,22 @@ pre { white-space: pre-wrap; word-break: break-word; background: var(--soft);
   border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0;
   font: 12.5px/1.45 ui-monospace, "SF Mono", Menlo, monospace; }
 pre.log { max-height: 360px; overflow: auto; }
+.src { display: inline-block; padding: 0 5px; border-radius: 3px; font-size: 10px; font-weight: 700;
+  letter-spacing: .04em; line-height: 16px; vertical-align: 1px; }
+.src.comp { background: #d18616; color: #111; } .src.arena { background: #2f6fd6; color: #fff; }
+.tabs { display: flex; gap: 4px; margin: 4px 0 10px; border-bottom: 1px solid var(--line); }
+.tabs a { padding: 6px 12px; border: 1px solid transparent; border-bottom: none;
+  border-radius: 6px 6px 0 0; color: var(--muted); }
+.tabs a.on { color: var(--fg); border-color: var(--line); background: var(--soft); font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 8px 0; }
+.tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--soft); }
+.tile .k { color: var(--muted); font-size: 12px; } .tile .v { font-size: 20px; font-weight: 650; margin: 2px 0; }
+.tile .d { color: var(--muted); font-size: 12px; }
+.gmaps a { display: inline-block; margin: 1px 2px 1px 0; padding: 0 5px; border-radius: 4px;
+  font-size: 12px; background: var(--chip); color: var(--fg); }
+.gmaps a.W { background: color-mix(in srgb, var(--win) 22%, transparent); }
+.gmaps a.L { background: color-mix(in srgb, var(--loss) 22%, transparent); }
+.check-ok { color: var(--win); } .check-no { color: var(--loss); }
 .chip { display: inline-block; padding: 0 6px; border-radius: 9px; background: var(--chip);
   font-size: 12px; line-height: 18px; white-space: nowrap; }
 .W, .win { color: var(--win); } .L, .loss { color: var(--loss); } .D, .draw { color: var(--draw); }
@@ -108,6 +131,7 @@ input, select, textarea, button { font: inherit; color: var(--fg); background: v
 button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer;
   padding: 5px 12px; }
 button:disabled { opacity: .5; cursor: default; }
+button.small { padding: 1px 8px; font-size: 12px; vertical-align: 2px; }
 form.stack { display: grid; grid-template-columns: max-content minmax(0, 560px); gap: 8px 12px;
   align-items: center; }
 form.stack label { color: var(--muted); }
@@ -164,9 +188,61 @@ def when(ts: str | None) -> str:
     return f'<span title="{e(ts)}">{e(ts.replace("T", " ")[:16])}</span>'
 
 
+_VERSIONS: dict = {"at": 0.0, "names": {}}
+
+
+def server_version_names(arena: Arena) -> dict[str, str]:
+    """{server submission id: its name} for our versions on the competition server
+    (from the bridge's cached list, refreshed at most every two minutes)."""
+    if time.time() - _VERSIONS["at"] > 120:
+        _VERSIONS["at"] = time.time()
+        try:
+            from arena.server import bridge
+            _VERSIONS["names"] = {str(s["id"]): s.get("name") or "" for s in bridge.get(arena).server_subs()}
+        except Exception:
+            pass
+    return _VERSIONS["names"]
+
+
+def side_label(arena: Arena, sid: str | None) -> str:
+    """Plain-text name of a seat: a competition team's name, 'us · <revision>' for one of our
+    server versions, else the arena submission id."""
+    if not sid:
+        return "-"
+    if sid.startswith("server:"):
+        return sid.removeprefix("server:")
+    if sid.startswith("server-version:"):
+        ver = sid.removeprefix("server-version:")
+        return f"us · {server_version_names(arena).get(ver) or 'v' + ver}"
+    return sid
+
+
+def is_comp(g) -> bool:
+    """A real battle downloaded from the competition server (not played by our judge)."""
+    return g.lane == "server"
+
+
+def src_badge(g) -> str:
+    return ('<span class="src comp" title="a real battle on the competition server">COMPETITION</span>'
+            if is_comp(g) else
+            '<span class="src arena" title="played by the arena\'s own judge">ARENA</span>')
+
+
+def our_seat(g) -> str | None:
+    """Our seat in a competition game (from the replay's bot ids)."""
+    return (g.meta or {}).get("our_seat") if is_comp(g) else None
+
+
 def sub_link(arena: Arena, sid: str | None, with_bot: bool = False) -> str:
     if not sid:
         return '<span class="muted">-</span>'
+    if sid.startswith("server:"):
+        team = sid.removeprefix("server:")
+        return (f'<a class="team" href="/games?source=competition&vs={q(sid)}" '
+                f'title="a team on the competition server">{e(team)}</a>')
+    if sid.startswith("server-version:"):
+        return (f'<a href="/server"><b>us</b></a> <span class="muted">'
+                f'{e(side_label(arena, sid).removeprefix("us · "))}</span>')
     s = arena.subs.get(sid)
     label = e(sid)
     if s and with_bot and not sid.startswith(f"{s.bot}-"):
@@ -288,6 +364,28 @@ def game_result(arena: Arena, g, sid: str | None = None) -> str:
     return f'{e(g.winner)}: {sub_link(arena, w)}'
 
 
+def comp_games_table(arena: Arena, games: list) -> str:
+    """Competition games from our side: opponent, kind, our seat and our result."""
+    rows = []
+    for g in games:
+        m = g.meta or {}
+        seat = our_seat(g)
+        us = g.a if seat == "A" else g.b if seat == "B" else None
+        res = result_for(g, us) if us else None
+        cls = {"W": "win", "L": "loss", "D": "draw"}.get(res or "", "")
+        word = {"W": "WIN", "L": "LOSS", "D": "DRAW"}.get(res or "", "?")
+        opp = g.b if seat == "A" else g.a
+        rows.append([f'<a href="/games/{g.id}">{g.id}</a>', when(g.played),
+                     f'<span class="chip">{"ranked" if m.get("ranked") else "unranked"}</span>',
+                     sub_link(arena, opp), sub_link(arena, us) if us else "-", e(seat or "?"),
+                     e(m.get("map_name") or g.map), f'<span class="chip {cls}">{word}</span>',
+                     e(g.rounds), e(g.reason),
+                     f'<a href="/games/{g.id}">watch</a>' if g.replay else ""])
+    return table(["#", "played", "kind", "opponent", "our bot", "our seat", "map", "result",
+                  "rounds", "end", ""], rows, numeric={0, 8},
+                 empty="no competition games downloaded yet")
+
+
 def games_table(arena: Arena, games: list, sid: str | None = None) -> str:
     rows = []
     for g in games:
@@ -295,8 +393,8 @@ def games_table(arena: Arena, games: list, sid: str | None = None) -> str:
         opp = ""
         if sid:
             opp = sub_link(arena, g.b if g.a == sid else g.a)
-        cells = [f'<a href="/games/{g.id}">{g.id}</a>', when(g.played), e(g.lane), e(g.suite),
-                 e(g.map), e(g.seed)]
+        cells = [f'<a href="/games/{g.id}">{g.id}</a> {src_badge(g)}', when(g.played), e(g.lane),
+                 e(g.suite), e(g.map), e(g.seed)]
         if sid:
             cells += ["A" if g.a == sid else "B", opp]
         else:
@@ -352,7 +450,22 @@ def make_router(arena: Arena) -> APIRouter:
                          f'<div>{line}</div><div class="note">{e(s.note)}</div></div>')
         strip = (f'<div class="cards">{"".join(cards)}</div>' if cards
                  else '<p class="muted">No submissions yet.</p>')
-        body = f"""<h1>Leaderboard</h1>
+        comp = [g for g in reversed(arena.games) if is_comp(g)][:12]
+        comp_html = ""
+        if comp:
+            chips = []
+            for g in comp:
+                seat = our_seat(g)
+                res = result_for(g, g.a if seat == "A" else g.b) if seat else None
+                opp = side_label(arena, g.b if seat == "A" else g.a)
+                chips.append(f'<a class="{e(res or "")}" href="/games/{g.id}" '
+                             f'title="{e((g.meta or {}).get("map_name") or g.map)} vs {e(opp)}">{e(res or "?")}</a>')
+            ours = side_label(arena, comp[0].a if our_seat(comp[0]) == "A" else comp[0].b)
+            comp_html = (f'<div class="flash"><span class="src comp">COMPETITION</span> live bot '
+                         f'<b>{e(ours.removeprefix("us · "))}</b> · last {len(comp)} server games '
+                         f'<span class="gmaps">{"".join(chips)}</span> · <a href="/server">server page</a></div>')
+        body = f"""<h1>Leaderboard <span class="src arena">ARENA</span></h1>
+{comp_html}
 <p class="sub">Current ranked submission of each active bot. Elo from a Bradley-Terry fit
 (reference bot 1000); score is (W + D/2) / games on the public maps.</p>
 {board}
@@ -538,12 +651,15 @@ document.getElementById("promote").onclick = async (ev) => {{
     # ------------------------------------------------------------ games
     @r.get("/games", response_class=HTMLResponse)
     def games_page(sub: str = "", vs: str = "", map: str = "", suite: str = "", lane: str = "",
-                   result: str = "", limit: int = 100):
+                   result: str = "", limit: int = 100, source: str = ""):
         limit = max(1, min(limit, 1000))
+        if source not in ("arena", "competition", "all"):
+            source = "competition" if (lane == "server" or vs.startswith("server:")) else "arena"
         games = http.find_games(arena, sub or None, vs or None, map or None, suite or None,
-                                lane or None, result or None, limit)
+                                lane or None, result or None, limit,
+                                source=None if source == "all" else source)
         params = {k: v for k, v in dict(sub=sub, vs=vs, map=map, suite=suite, lane=lane,
-                                        result=result).items() if v}
+                                        result=result, source=source).items() if v}
         subs = sorted({x for g in arena.games for x in (g.a, g.b)})
         maps_ = sorted({g.map for g in arena.games})
 
@@ -558,12 +674,28 @@ document.getElementById("promote").onclick = async (ev) => {{
 <label>lane<select name="lane">{opt(["draft", "placement", "continuous", "check", "server"], lane)}</select></label>
 <label>result (for submission)<select name="result">{opt(["W", "D", "L"], result)}</select></label>
 <label>limit<input name="limit" value="{limit}" size="4"></label>
-<button type="submit">Filter</button> <a href="/games">clear</a>
+<input type="hidden" name="source" value="{e(source)}">
+<button type="submit">Filter</button> <a href="/games?source={e(source)}">clear</a>
 <datalist id="subs">{"".join(f'<option value="{e(x)}">' for x in subs)}</datalist>
 </form>"""
         api = "/api/v1/games" + ("?" + urlencode({**params, "limit": limit}) if params else "")
-        body = (f"<h1>Games</h1>{form}<p class=\"sub\">{len(games)} shown, newest first</p>"
-                + games_table(arena, games, sid=sub if sub and sub in arena.subs else None))
+        tab = lambda k, label: (f'<a class="{"on" if source == k else ""}" '
+                                f'href="/games?source={k}">{label}</a>')
+        tabs = (f'<div class="tabs">{tab("arena", "<span class=\"src arena\">ARENA</span> games our judge played")}'
+                f'{tab("competition", "<span class=\"src comp\">COMPETITION</span> real battles on the server")}'
+                f'{tab("all", "all")}</div>')
+        explain = {
+            "arena": "Games the arena played with the official judge on poscatgpu2: drafts, "
+                     "placement and background games between submissions. These make the ratings.",
+            "competition": "Real games our live bot played on the competition server "
+                           "(game.battlecode.au), downloaded automatically. They don't count in "
+                           "arena ratings; see the <a href=\"/server\">Server</a> page for battles.",
+            "all": "Arena and competition games together."}[source]
+        listing = (comp_games_table(arena, games) if source == "competition"
+                   else games_table(arena, games, sid=sub if sub and sub in arena.subs else None))
+        body = (f"<h1>Games</h1>{tabs}<p class=\"sub\">{explain}</p>"
+                + (form if source != "competition" else "")
+                + f"<p class=\"sub\">{len(games)} shown, newest first</p>" + listing)
         return layout("Games", body, api, "/games")
 
     @r.get("/games/{gid}", response_class=HTMLResponse)
@@ -571,20 +703,40 @@ document.getElementById("promote").onclick = async (ev) => {{
         g = http.find_game(arena, gid)
         if g is None:
             raise HTTPException(404, f"no game {gid}")
-        win = (f'<b class="W">{e(g.a if g.winner == "A" else g.b)}</b> wins' if g.winner else
+        names = {"A": side_label(arena, g.a), "B": side_label(arena, g.b)}
+        win = (f'<b class="W">{e(names[g.winner])}</b> wins' if g.winner else
                '<b class="L">error</b>' if g.error else '<b class="D">draw</b>')
         verdict = (f'{win} after {e(g.rounds)} rounds'
                    + (f' <span class="m">({e(g.reason)})</span>' if g.reason else ""))
-        seats = (f'<span class="sa">A</span> <a href="/s/{q(g.a)}">{e(g.a)}</a> vs '
-                 f'<span class="sb">B</span> <a href="/s/{q(g.b)}">{e(g.b)}</a>')
-        links = (f'<a href="/games?sub={q(g.a)}&vs={q(g.b)}">this pairing</a> · '
-                 + (f'<a href="/api/v1/games/{g.id}/replay">replay</a> · ' if g.replay else "")
-                 + f'<a href="/api/v1/games/{g.id}">JSON</a>')
+        seats = (f'<span class="sa">A</span> {sub_link(arena, g.a)} vs '
+                 f'<span class="sb">B</span> {sub_link(arena, g.b)}')
+        if is_comp(g):
+            m = g.meta or {}
+            seat = our_seat(g)
+            res = result_for(g, g.a if seat == "A" else g.b) if seat else None
+            word = {"W": '<b class="W">WE WON</b>', "L": '<b class="L">WE LOST</b>',
+                    "D": '<b class="D">DRAW</b>'}.get(res or "", "")
+            bid = m.get("server_battle")
+            context = (f'{src_badge(g)} {"ranked" if m.get("ranked") else "unranked"} battle '
+                       + (f'<a href="https://game.battlecode.au/visualiser?match={q(bid)}">M{e(bid)}</a>' if bid else "")
+                       + f' · we were seat {e(seat or "?")} · {word}')
+            links = (f'<a href="/server">server</a> · '
+                     + (f'<a href="/api/v1/games/{g.id}/replay">replay</a> · ' if g.replay else "")
+                     + f'<a href="/api/v1/games/{g.id}">JSON</a>')
+            back = '<a href="/games?source=competition">competition games</a>'
+        else:
+            lane_words = {"draft": "draft check", "placement": "placement", "continuous": "background game",
+                          "holdout": "holdout", "check": "submission check"}
+            context = f'{src_badge(g)} {e(lane_words.get(g.lane, g.lane))} on the {e(g.suite)} maps'
+            links = (f'<a href="/games?sub={q(g.a)}&vs={q(g.b)}">this pairing</a> · '
+                     + (f'<a href="/api/v1/games/{g.id}/replay">replay</a> · ' if g.replay else "")
+                     + f'<a href="/api/v1/games/{g.id}">JSON</a>')
+            back = '<a href="/games">games</a>'
         header = f"""<div class="gh">
 <a class="home" href="/">tokenz-arena</a>
-<span>#{g.id}</span><span>{seats}</span><span>{verdict}</span>
-<span class="m">{e(g.map)} · {e(g.suite)} · {e(g.lane)} · seed {e(g.seed)} · {when(g.played)}</span>
-<span class="r">{links} · <a href="/games">games</a></span>
+<span>#{g.id}</span><span>{context}</span><span>{seats}</span><span>{verdict}</span>
+<span class="m">{e((g.meta or {}).get("map_name") or g.map)} · seed {e(g.seed)} · {when(g.played)}</span>
+<span class="r">{links} · {back}</span>
 </div>"""
         head = """<style>
 .gh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding: 6px 14px;
@@ -598,7 +750,9 @@ document.getElementById("promote").onclick = async (ev) => {{
 </style>"""
         if g.replay:
             return HTMLResponse(viewer.page(f"/api/v1/games/{g.id}/replay",
-                                            f"{g.a} vs {g.b} on {g.map}", header=header, head=head))
+                                            f"{names['A']} vs {names['B']} on {g.map}",
+                                            header=header, head=head + f"<style>{SRC_CSS}</style>",
+                                            team_names=names))
         body = f"""<h1>Game {g.id}</h1><div class="kv">
 <div>seats</div><div>A {sub_link(arena, g.a)} vs B {sub_link(arena, g.b)}</div>
 <div>verdict</div><div>{verdict}</div>
@@ -627,9 +781,9 @@ watched; its verdict and stats are below.</p>
                          f'<a href="/games?map={q(m["map"])}&suite={q(m["suite"])}">games</a>'])
         played = {(m["suite"], m["map"]) for m in http.map_stats(arena)}
         unplayed = []
-        for suite in ("official", "tournament", "server", "custom", "rotating"):
-            d = arena.cfg.map_dir(suite)
-            for p in sorted(d.glob("*.map")) if d and d.is_dir() else []:
+        from arena.maps import suite_files
+        for suite in ("server", "official", "tournament", "custom", "rotating"):
+            for p in suite_files(arena.cfg, suite):
                 if (suite, p.stem) not in played:
                     unplayed.append(f'<a href="/maps/{q(suite)}/{q(p.stem)}">{e(suite)}/{e(p.stem)}</a>')
         body = f"""<h1>Maps</h1>
@@ -834,59 +988,104 @@ f.onsubmit = async (ev) => {{
 
     # ------------------------------------------------------------ competition server
     @r.get("/server", response_class=HTMLResponse)
-    def server_page():
-        body = """<h1>Competition server</h1>
-<div id="srv"><p class="muted">loading…</p></div>
+    def server_page(request: Request):
+        try:
+            from arena.server import bridge as bridge_mod, routes as server_routes
+            b = bridge_mod.get(arena)
+        except Exception:
+            b = None
+        if b is None or not b.configured:
+            body = ('<h1>Competition server</h1><div class="flash">The server bridge isn\'t '
+                    'configured on this arena (no server key), so there\'s nothing to show.</div>')
+            return layout("Server", body, "/api/v1/server", "/server")
+        try:
+            d = b.summary()
+        except Exception as ex:
+            d = {"status": f"error: {ex}"}
+        team, live = d.get("team") or {}, d.get("live") or {}
+        auto, quota = d.get("auto_submit") or {}, d.get("quota") or {}
+        cand = auto.get("candidate") or {}
+        rec_ = team.get("record") or {}
+        live_arena = live.get("arena") or ""
+        live_link = ("" if not live_arena or live_arena.startswith("server-version:")
+                     else f' · arena {sub_link(arena, live_arena)}')
+
+        def tile(k, v, dsc=""):
+            return f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{dsc}</div></div>'
+        paused = auto.get("paused")
+        toggle = (f'<button class="small" onclick="srv(\'{"resume" if paused else "pause"}\')">'
+                  f'{"resume" if paused else "pause"}</button>')
+        tiles = "".join([
+            tile("our live bot", e(live.get("name") or "-"),
+                 f'server version {e(live.get("server_version") or "-")}{live_link}<br>'
+                 f'{rec(live.get("record"))} on the server'),
+            tile("team rank", f'#{e(team.get("rank") or "-")}',
+                 f'{e(team.get("name") or "")} · rating {e(team.get("elo") or "-")} '
+                 f'(peak {e(team.get("peak") or "-")}) · {e(rec_.get("wins", 0))}-{e(rec_.get("draws", 0))}-'
+                 f'{e(rec_.get("losses", 0))} all time'),
+            tile("battle quota", f'{e(quota.get("remaining") if quota.get("remaining") is not None else "?")} / 60',
+                 "games left this hour" + (f' · more in {e(quota.get("free_in_minutes"))} min'
+                                           if quota.get("free_in_minutes") else "")),
+            tile("auto-submit", ("<span class='L'>paused</span>" if paused else
+                                 "<span class='W'>on</span>" if auto.get("enabled") else "off") + " " + toggle,
+                 (f'paused by {e(auto.get("paused_by"))} · ' if paused else "")
+                 + f'at most every {e(auto.get("min_hours"))} h · last upload {when(auto.get("last_upload")) or "never"}'),
+        ])
+        checks = cand.get("checks") or []
+        check_rows = [[('<span class="check-ok">✓</span>' if c.get("ok") else '<span class="check-no">✗</span>'),
+                       e(c.get("check")), f'<td class="note">{e(c.get("detail") or "")}</td>'] for c in checks]
+        failed = cand.get("failed") or []
+        gate = (f'<h2>Auto-submit gate <span class="sub">would the arena\'s best replace our live bot?</span></h2>'
+                f'<p>Candidate: {sub_link(arena, cand.get("candidate")) if cand.get("candidate") else "<span class=muted>none</span>"}'
+                f' · {"<b class=W>passes, will upload</b>" if cand.get("passed") else "<b class=L>held back</b>"}'
+                f' <span class="muted">(checked {when(cand.get("at"))})</span></p>'
+                + (f'<ul>{"".join(f"<li>{e(x)}</li>" for x in failed)}</ul>' if failed else "")
+                + (table(["", "check", "evidence"], check_rows) if check_rows else ""))
+        try:
+            battles = server_routes._battle_rows(arena, b, 25) if hasattr(server_routes, "_battle_rows") else None
+        except Exception:
+            battles = None
+        if battles is None:
+            rows_, _ = b.client.battles(25)
+            battles = [server_routes._battle_row(x, b.battle_summary(x["id"]))
+                       for x in (rows_ if isinstance(rows_, list) else [])[:25]]
+        brows = []
+        for x in battles:
+            res = x.get("result") or "pending"
+            cls = {"win": "win", "loss": "loss", "draw": "draw"}.get(res, "")
+            gm = "".join(f'<a class="{e(gg.get("result") or "")}" href="/games/{gg["arena_game"]}" title="watch">'
+                         f'{e(gg.get("map") or "?")}</a>' if gg.get("arena_game") else
+                         f'<a class="{e(gg.get("result") or "")}">{e(gg.get("map") or "?")}</a>'
+                         for gg in x.get("games") or [])
+            elo = x.get("elo_change")
+            brows.append([when(x.get("at")), f'<span class="chip">{e(x.get("kind"))}</span>',
+                          f'{e(x.get("opponent"))} <span class="muted">{e(x.get("opponent_elo") or "")}</span>',
+                          f'<span class="chip {cls}">{e(res)}</span>', f'{e(x.get("wins"))}-{e(x.get("losses"))}',
+                          ("" if elo in (None, 0) else f'<span class="{"W" if elo > 0 else "L"}">{elo:+d}</span>'),
+                          f'<span class="gmaps">{gm}</span>'])
+        ups = d.get("uploads") or []
+        up_rows = [[when(u.get("at")), sub_link(arena, u.get("arena")), e(u.get("server_version")),
+                    e(u.get("status") or u.get("result") or "")] for u in ups]
+        dl = d.get("downloads") or {}
+        body = f"""<h1>Competition server <span class="src comp">COMPETITION</span></h1>
+<p class="sub">Our team on <a href="{e(d.get("server") or "https://game.battlecode.au")}">game.battlecode.au</a>.
+These are real battles, played by our live bot against other teams. Arena games (our own judge)
+are on the <a href="/games">Games</a> page.{' <b>Cached copy</b>: the server rate-limited us.' if d.get("stale") else ''}</p>
+<div class="tiles">{tiles}</div>
+<h2>Recent battles <span class="sub">click a map to watch that game</span></h2>
+{table(["when", "kind", "opponent (rating)", "result", "W-L", "rating", "games"], brows, empty="no battles yet")}
+<p class="sub">{e(dl.get("games"))} games from {e(dl.get("battles"))} battles downloaded · last check {when(dl.get("last_poll"))}
+· <a href="/games?source=competition">all competition games</a></p>
+{gate}
+<h2>Uploads by the arena</h2>
+{table(["when", "arena submission", "server version", "status"], up_rows, empty="none yet")}
 <script>
-const esc = (x) => String(x ?? "").replace(/[&<>"']/g,
-  (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
-const scalar = (v) => v === null || typeof v !== "object";
-const show = (v) => {
-  if (v === null || v === undefined) return '<span class="muted">-</span>';
-  if (typeof v === "boolean") return v ? "yes" : "no";
-  if (typeof v === "string" && /^[\\w.-]+-\\d+$/.test(v)) return '<a href="/s/' + encodeURIComponent(v) + '">' + esc(v) + '</a>';
-  if (typeof v === "string" && /^https?:\\/\\//.test(v)) return '<a href="' + esc(v) + '">' + esc(v) + '</a>';
-  if (typeof v === "object") return '<code>' + esc(JSON.stringify(v)) + '</code>';
-  return esc(v);
-};
-const kv = (o) => '<div class="kv">' + Object.entries(o).filter(([k, v]) => scalar(v))
-  .map(([k, v]) => '<div>' + esc(k.replace(/_/g, " ")) + '</div><div>' + show(v) + '</div>').join("") + '</div>';
-const tab = (rows) => {
-  const cols = [...new Set(rows.flatMap((r) => scalar(r) ? ["value"] : Object.keys(r)))];
-  return '<div class="wrap"><table><thead><tr>' + cols.map((c) => '<th>' + esc(c.replace(/_/g, " ")) + '</th>').join("") +
-    '</tr></thead><tbody>' + rows.map((r) => '<tr>' + cols.map((c) => {
-      const v = scalar(r) ? r : r[c];
-      if (c === "game" || c === "arena_game" || c === "game_id") return '<td>' + (v ? '<a href="/games/' + encodeURIComponent(v) + '">watch ' + esc(v) + '</a>' : '') + '</td>';
-      return '<td>' + show(v) + '</td>';
-    }).join("") + '</tr>').join("") + '</tbody></table></div>';
-};
-const section = (title, v) => {
-  if (Array.isArray(v)) return '<h2>' + esc(title) + '</h2>' + (v.length ? tab(v) : '<p class="muted">none</p>');
-  if (v && typeof v === "object") {
-    const nested = Object.entries(v).filter(([k, x]) => !scalar(x));
-    return '<h2>' + esc(title) + '</h2>' + kv(v) + nested.map(([k, x]) => section(title + ": " + k.replace(/_/g, " "), x)).join("");
-  }
-  return "";
-};
-(async () => {
-  const el = document.getElementById("srv");
-  let r;
-  try { r = await fetch("/api/v1/server"); } catch (err) { r = null; }
-  if (!r || r.status === 404 || !r.ok) {
-    el.innerHTML = '<div class="flash">The server bridge is not running on this arena' +
-      (r && r.status !== 404 ? ' (/api/v1/server answered ' + r.status + ')' : '') +
-      ', so there is nothing to show yet. Once it runs, this page shows the live bot, rank, rating, ' +
-      'quota, auto-submit state, the candidate and recent battles.</div>';
-    return;
-  }
-  const d = await r.json();
-  let html = d.stale ? '<div class="flash">Cached copy (the competition server rate-limited us).</div>' : '';
-  html += '<h2>Summary</h2>' + kv(d);
-  for (const [k, v] of Object.entries(d)) if (!scalar(v)) html += section(k.replace(/_/g, " "), v);
-  el.innerHTML = html;
-})();
+async function srv(what) {{
+  const r = await fetch("/api/v1/server/" + what, {{method: "POST", headers: {{"Content-Type": "application/json"}}, body: "{{}}"}});
+  if (r.ok) location.reload(); else alert((await r.json()).detail || r.status);
+}}
 </script>"""
-        return layout("Server", body, ["/api/v1/server", "/api/v1/server/battles"], "/server")
+        return layout("Server", body, ["/api/v1/server", "/api/v1/server/battles", "/api/v1/server/gate"], "/server")
 
     return r
 

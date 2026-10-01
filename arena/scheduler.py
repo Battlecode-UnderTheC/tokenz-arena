@@ -38,10 +38,8 @@ class Job:
 
 
 def maps(arena: Arena, suite: str) -> list[Path]:
-    dirs = [arena.cfg.map_dir(suite)]
-    if suite == "holdout":                      # generated + hidden team uploads
-        dirs.append(arena.cfg.map_dir("holdout_custom"))
-    return sorted(p for d in dirs if d and d.is_dir() for p in d.glob("*.map"))
+    from arena.maps import suite_files
+    return suite_files(arena.cfg, suite)
 
 
 def ranking(arena: Arena) -> list[str]:

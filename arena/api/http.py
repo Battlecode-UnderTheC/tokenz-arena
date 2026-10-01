@@ -48,6 +48,7 @@ def game_json(g, full: bool = False) -> dict:
                         for k, t in (st.get("teams") or {}).items()}
         if st.get("tiebreak"):
             d["summary"]["tiebreak"] = st["tiebreak"]
+    d["source"] = "competition" if g.lane == "server" else "arena"
     d["replay_url"] = f"/api/v1/games/{g.id}/replay" if g.replay else None
     d["watch_url"] = f"/games/{g.id}" if g.replay else None
     return d
@@ -118,11 +119,14 @@ def ideas(arena: Arena, q: str = "", bot: str | None = None, outcome: str | None
 
 def find_games(arena: Arena, sub: str | None = None, vs: str | None = None,
                map: str | None = None, suite: str | None = None, lane: str | None = None,
-               result: str | None = None, limit: int = 50) -> list:
-    """GET /api/v1/games: matching Game objects, newest first."""
+               result: str | None = None, limit: int = 50, source: str | None = None) -> list:
+    """GET /api/v1/games: matching Game objects, newest first. source: 'arena' (games our judge
+    played), 'competition' (real battles downloaded from the competition server) or None (both)."""
     out = []
     for g in reversed(arena.games):
         if g.suite == "holdout":          # hidden: only aggregate W-D-L is ever shown
+            continue
+        if source == "arena" and g.lane == "server" or source == "competition" and g.lane != "server":
             continue
         if sub and sub not in (g.a, g.b):
             continue
@@ -292,9 +296,9 @@ def create_app(arena: Arena) -> FastAPI:
     # ------------------------------------------------------------ games
     @api.get("/games")
     def get_games(sub: str | None = None, vs: str | None = None, map: str | None = None,
-                  suite: str | None = None, lane: str | None = None, result: str | None = None,
+                  suite: str | None = None, lane: str | None = None, result: str | None = None, source: str | None = None,
                   limit: int = Query(50, le=1000)):
-        return [game_json(g) for g in find_games(arena, sub, vs, map, suite, lane, result, limit)]
+        return [game_json(g) for g in find_games(arena, sub, vs, map, suite, lane, result, limit, source=source)]
 
     def get_game_obj(gid: int):
         g = find_game(arena, gid)

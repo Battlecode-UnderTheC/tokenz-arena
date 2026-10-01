@@ -159,3 +159,11 @@ def test_map_name_lint(arena, tmp_path):
     real = config.Config(raw={}, data_dir=tmp_path / "d")
     warnings = submit._map_names(real, root)
     assert len(warnings) == 1 and "Colosseum" in warnings[0]
+
+
+def test_server_maps_supersede_official_copies(arena):
+    server = arena.cfg.data_dir / "maps" / "server"
+    server.mkdir(parents=True)
+    (server / "uno.map").write_text("MAP 4 4\nMAP_NAME One\n")       # same map as official one.map
+    assert [p.stem for p in scheduler.maps(arena, "official")] == ["two"]
+    assert [p.stem for p in scheduler.maps(arena, "server")] == ["uno"]
