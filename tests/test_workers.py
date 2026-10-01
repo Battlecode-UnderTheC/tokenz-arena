@@ -88,3 +88,14 @@ def test_expired_lease_is_owed_again(setup):
 def test_holdout_maps_never_served(setup):
     a, d, c, _ = setup
     assert c.get("/api/v1/workers/map/holdout/h1", headers=TOKEN).status_code == 404
+
+
+def test_worker_exits_when_idle(tmp_path, monkeypatch):
+    from arena import worker as wmod
+    w = wmod.Worker("http://arena", "t", "w", 1, tmp_path, idle_exit=0.2)
+    monkeypatch.setattr(w, "_json", lambda path, payload: {"leases": [], "heartbeat_seconds": 30})
+    monkeypatch.setattr(wmod.time, "sleep", lambda s: None)
+    t0 = time.monotonic()
+    w.last_work -= 1                      # idle for a second already
+    w.run()
+    assert w.stopping.is_set() and time.monotonic() - t0 < 5
