@@ -128,3 +128,34 @@ def test_rotating_epochs():
     from arena import maps
     assert maps.epoch(maps.EPOCH_START + 6 * 86400) == 0
     assert maps.epoch(maps.EPOCH_START + 7 * 86400) == 1
+
+
+def test_interval_flags_noise():
+    from arena.report import interval
+    assert interval({"W": 9, "D": 0, "L": 6})["significant"] is False      # 60% of 15: noise
+    big = interval({"W": 120, "D": 0, "L": 80})                             # 60% of 200
+    assert big["significant"] is True and big["ci"][0] > 50
+
+
+def test_old_engine_games_are_historical(arena):
+    from arena import state
+    p = add(arena, "base")
+    q = add(arena, "other")
+    seed = arena.cfg.seeds("official")[0]
+    old = Game(id=0, lane="placement", suite="official", map="one", seed=seed, a=p.id, b=q.id,
+               winner="A", rounds=500, meta={"engine": "1.0.0"})
+    new = Game(id=0, lane="placement", suite="official", map="one", seed=seed, a=p.id, b=q.id,
+               winner="A", rounds=500, meta={"engine": state.ENGINE})
+    assert not state.is_rated(old) and state.is_rated(new)
+    arena.add_game(old)                        # an old-rules game doesn't satisfy the job
+    key = (p.id, q.id, "official", "one", seed)
+    assert key in {j.key for j in scheduler.next_jobs(arena, 100)}
+
+
+def test_map_name_lint(arena, tmp_path):
+    root = tmp_path / "bot"
+    root.mkdir()
+    (root / "main.py").write_text('if name == "Colosseum":\n    go()\nx = "hello world"\n')
+    real = config.Config(raw={}, data_dir=tmp_path / "d")
+    warnings = submit._map_names(real, root)
+    assert len(warnings) == 1 and "Colosseum" in warnings[0]

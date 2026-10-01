@@ -111,6 +111,35 @@ def _env_reads(root: Path, lang: str) -> str | None:
     return None
 
 
+def _map_names(cfg, root: Path) -> list[str]:
+    """Warnings for source that names a map in a string literal: possible map-keyed logic,
+    which overfits our maps and breaks on new tournament maps."""
+    names = set()
+    for suite in ("official", "tournament", "server"):
+        d = cfg.map_dir(suite)
+        for p in d.glob("*.map") if d and d.is_dir() else []:
+            names.add(p.stem.lower())
+            for line in p.read_text(errors="replace").splitlines()[:5]:
+                if line.startswith("MAP_NAME"):
+                    names.add(line.split(None, 1)[1].strip().lower())
+    names = {n for n in names if len(n) >= 4 and n not in {"default", "arena", "maze"}}
+    if not names:
+        return []
+    pat = re.compile(r"""["']([^"'\n]{4,40})["']""")
+    out = []
+    for p in sorted(root.rglob("*")):
+        if p.suffix not in _SOURCE_EXT or not p.is_file():
+            continue
+        for n, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
+            for lit in pat.findall(line):
+                if lit.strip().lower() in names:
+                    out.append(f"{p.relative_to(root)}:{n}: names the map {lit!r} "
+                               "(map-keyed logic overfits; new tournament maps break it)")
+        if len(out) >= 5:
+            break
+    return out[:5]
+
+
 def accept(arena: Arena, *, blob: bytes, bot: str, owner: str, note: str = "",
            parent: str | None = None, source: str | None = None, lane: str = "draft",
            agent: str | None = None) -> tuple[Submission, bool]:
@@ -154,6 +183,7 @@ def check(arena: Arena, s: Submission) -> bool:
         s.language = _language(root)
         if hit := _env_reads(root, s.language):
             raise Rejected(f"reads environment variables (not allowed by the competition): {hit}")
+        s.warnings = _map_names(cfg, root)
     except Rejected as e:
         reject(arena, s, str(e))
         return False

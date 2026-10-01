@@ -153,9 +153,14 @@ def show_submission(d: dict):
         if v.get("vs_parent"):
             p = v["vs_parent"]
             b = {True: "BEATS parent", False: "loses to parent", None: "even with parent"}[p.get("beats_parent")]
-            print(f"    vs parent {p['parent']}: {wdl(p)}  {p.get('score')}%  -> {b}")
+            ci = p.get("ci")
+            noise = "" if p.get("significant") or not ci else "  (within noise)"
+            print(f"    vs parent {p['parent']}: {wdl(p)}  {p.get('score')}%"
+                  + (f" [95% CI {ci[0]}-{ci[1]}]" if ci else "") + f"  -> {b}{noise}")
         for o in v.get("opponents") or []:
-            print(f"    vs {o['opponent']}: {wdl(o)}  {o.get('score')}%")
+            ci = o.get("ci")
+            print(f"    vs {o['opponent']}: {wdl(o)}  {o.get('score')}%"
+                  + (f" [95% CI {ci[0]}-{ci[1]}]" if ci else ""))
     print(f"  page     {DEFAULT_URL_HINT}/s/{d['id']}")
 
 
@@ -275,6 +280,13 @@ def cmd_report(args):
             print(f"vs parent {p['parent']}: {wdl(p)} ({p.get('score')}%)")
         print("\nby opponent (worst first)")
         table([[o["opponent"], wdl(o), o.get("score")] for o in r["by_opponent"]], ["opponent", "W-D-L", "%"])
+        print("\nby seat / by how games ended")
+        table([[f"seat {k}", wdl(x), x.get("score")] for k, x in r.get("by_seat", {}).items()]
+              + [[k, wdl(x), x.get("score")] for k, x in r.get("by_end", {}).items()], ["", "W-D-L", "%"])
+        ec = {k: x for k, x in (r.get("economy") or {}).items() if x}
+        if ec:
+            print("\neconomy (mean dragons alive): " + ", ".join(
+                f"{k} {x['dragons']} vs {x['opponent_dragons']}" for k, x in ec.items()))
         print("\nby map (worst first)")
         table([[m["map"], wdl(m), m.get("score")] for m in r["by_map"]], ["map", "W-D-L", "%"])
         print(f"\ndeaths ({r.get('deaths_per_game')} per game, {r.get('errors')} errors)")

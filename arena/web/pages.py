@@ -202,6 +202,17 @@ def score_bar(score: float | None) -> str:
             f'</span></span> {score:.1f}%')
 
 
+def score_ci(r: dict) -> str:
+    """Score bar plus the 95% interval, and a 'noise' chip when it includes 50%."""
+    out = score_bar(r.get("score"))
+    ci = r.get("ci")
+    if ci:
+        out += f' <span class="muted" title="95% Wilson interval">({ci[0]:.0f}-{ci[1]:.0f})</span>'
+        if r.get("significant") is False:
+            out += ' <span class="chip" title="the interval includes 50%: consistent with no difference">noise</span>'
+    return out
+
+
 def parent_verdict(v: dict | None) -> str:
     """'vs parent 5-1-2 beats' from report.verdict's vs_parent."""
     vp = (v or {}).get("vs_parent")
@@ -456,12 +467,12 @@ document.getElementById("promote").onclick = async (ev) => {{
             if v.get("vs_parent"):
                 vp = v["vs_parent"]
                 vrows.append([f'parent {sub_link(arena, vp["parent"], with_bot=True)}', rec(vp),
-                              score_bar(vp["score"]), parent_verdict(v)])
+                              score_ci(vp), parent_verdict(v)])
             for o in v.get("opponents", []):
                 if v.get("vs_parent") and o["opponent"] == v["vs_parent"]["parent"]:
                     continue
                 vrows.append([sub_link(arena, o["opponent"], with_bot=True), rec(o),
-                              score_bar(o["score"]), ""])
+                              score_ci(o), ""])
             verdict_html = (f'<h2>Draft verdict <span class="sub">'
                             f'{"complete" if v.get("complete") else "in progress"}</span></h2>'
                             + table(["opponent", "W-D-L", "score", ""], vrows,
@@ -469,10 +480,10 @@ document.getElementById("promote").onclick = async (ev) => {{
         rep_html = ""
         if s.status not in ("checking", "external"):
             rep = report.build(arena, s.id)
-            opp = [[sub_link(arena, x["opponent"], with_bot=True), rec(x), score_bar(x["score"]),
+            opp = [[sub_link(arena, x["opponent"], with_bot=True), rec(x), score_ci(x),
                     f'<a href="/games?sub={q(s.id)}&vs={q(x["opponent"])}">games</a>']
                    for x in rep["by_opponent"]]
-            mp = [[e(x["map"]), rec(x), score_bar(x["score"]),
+            mp = [[e(x["map"]), rec(x), score_ci(x),
                    f'<a href="/games?sub={q(s.id)}&map={q(x["map"].split("/", 1)[-1])}">games</a>']
                   for x in rep["by_map"]]
             deaths = [[e(k), str(n)] for k, n in rep["deaths"].items()]
@@ -492,6 +503,14 @@ document.getElementById("promote").onclick = async (ev) => {{
 <div><h2>By map <span class="sub">worst first</span></h2>{table(["map", "W-D-L", "score", ""], mp)}</div>
 <div><h2>Deaths <span class="sub">{rep["deaths_per_game"] if rep["deaths_per_game"] is not None else '-'} per game ·
 {rep["errors"]} errors</span></h2>{table(["cause", "count"], deaths, numeric={1}, empty="no deaths recorded")}</div>
+<div><h2>By seat and by how games ended</h2>
+{table(["", "W-D-L", "score"], [[f"seat {k}", rec(x), score_ci(x)] for k, x in rep["by_seat"].items()]
+       + [[e(k), rec(x), score_ci(x)] for k, x in rep["by_end"].items()], empty="no games yet")}
+<h2>Economy <span class="sub">mean dragons alive</span></h2>
+{table(["round", "ours", "theirs", "games"], [[k, str(x["dragons"]), str(x["opponent_dragons"]), str(x["games"])]
+       for k, x in rep["economy"].items() if x], numeric={1, 2, 3}, empty="no games reached round 50")}
+{f'<p class="muted">{rep["historical_games"]} games from an older judge version are kept but not counted.</p>' if rep.get("historical_games") else ''}
+</div>
 <div><h2>CPU</h2><div class="kv">
 <div>p99 (worst game)</div><div>{fmt(cpu["p99_max"])}</div>
 <div>max</div><div>{fmt(cpu["max"])}</div>

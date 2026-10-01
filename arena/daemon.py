@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from arena import rating, runner, scheduler, stats, store, submit
-from arena.state import CHECKING, Arena, Game, now
+from arena.state import CHECKING, ENGINE, Arena, Game, now
 
 log = logging.getLogger("arena")
 
@@ -110,7 +110,7 @@ class Daemon:
     def _play(self, job: scheduler.Job):
         a, cfg = self.arena, self.arena.cfg
         g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
-                 a=job.a, b=job.b)
+                 a=job.a, b=job.b, meta={"engine": ENGINE})
         try:
             r = runner.play(Path(job.map), cfg.bots / job.a, cfg.bots / job.b, job.seed,
                             cfg.work / "replays", work_root=cfg.work,

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
+from importlib.metadata import PackageNotFoundError, version
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -46,6 +47,7 @@ class Submission:
     created: str = field(default_factory=now)
     promoted: str | None = None
     promoted_by: str | None = None
+    warnings: list = field(default_factory=list)   # lints that don't reject (e.g. map names)
     opponents: list | None = None   # frozen when its draft or placement starts
 
 
@@ -145,6 +147,12 @@ class Arena:
             return self.subs[sid]
 
 
+try:
+    ENGINE = version("unswbc")            # the judge every local game here is played with
+except PackageNotFoundError:
+    ENGINE = "unknown"
+FIRST_ENGINE = "1.2.3"                    # games recorded before games carried their engine
+
 RATED_LANES = {"draft", "placement", "continuous"}
 HIDDEN_SUITES = {"holdout", "check"}     # never in ratings, listings or replays
 
@@ -153,7 +161,14 @@ def is_rated(g: Game) -> bool:
     """A local game between two submissions on a public suite (official, tournament, server,
     rotating): what ratings, records and head-to-heads count. Real server games (lane
     'server'), checks and the hidden holdout don't count."""
-    return g.lane in RATED_LANES and g.suite not in HIDDEN_SUITES and not g.error and g.a != g.b
+    return (g.lane in RATED_LANES and g.suite not in HIDDEN_SUITES and not g.error and g.a != g.b
+            and current_engine(g))
+
+
+def current_engine(g: Game) -> bool:
+    """Played under the judge version running now. When unswbc changes (a rule change), older
+    games become historical: kept and shown, but out of ratings and verdicts."""
+    return (g.meta or {}).get("engine", FIRST_ENGINE) == ENGINE
 
 
 def result_for(g: Game, sid: str) -> str | None:

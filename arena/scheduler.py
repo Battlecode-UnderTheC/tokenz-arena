@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from arena import store
-from arena.state import is_rated, DONE, PLACING, PLAYING, QUEUED, RATED, REJECTED, EXTERNAL, Arena
+from arena.state import current_engine, is_rated, DONE, PLACING, PLAYING, QUEUED, RATED, REJECTED, EXTERNAL, Arena
 
 DRAFT, PLACEMENT, HOLDOUT, CONTINUOUS = 0, 1, 2, 3
 LANES = {DRAFT: "draft", PLACEMENT: "placement", HOLDOUT: "holdout", CONTINUOUS: "continuous"}
@@ -178,7 +178,7 @@ def _continuous(arena: Arena, taken: set) -> list[Job]:
 def next_jobs(arena: Arena, limit: int) -> list[Job]:
     """Up to `limit` jobs to start now, in priority and fair-share order."""
     with arena.lock:
-        taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games}
+        taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games if current_engine(g)}
         taken |= set(arena.running)
         owed = []
         for s in arena.subs.values():
@@ -207,7 +207,7 @@ def next_jobs(arena: Arena, limit: int) -> list[Job]:
 def settle(arena: Arena):
     """Moves submissions whose owed games are all played: draft -> done, placing -> rated."""
     with arena.lock:
-        taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games}
+        taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games if current_engine(g)}
         running = set(arena.running)
         for s in arena.subs.values():
             if s.status not in (QUEUED, PLAYING, PLACING):
