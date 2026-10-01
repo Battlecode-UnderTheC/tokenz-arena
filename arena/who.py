@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 
 
@@ -35,4 +36,43 @@ def whois(ip: str) -> dict | None:
     return json.loads(out)
 
 
-# TODO(build order 2): identify(request) -> Caller
+_CACHE: dict[str, tuple[float, Caller | None]] = {}
+_LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _from_whois(ip: str) -> Caller | None:
+    hit = _CACHE.get(ip)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    w = whois(ip)
+    caller = None
+    if w:
+        node = w.get("Node") or {}
+        user = w.get("UserProfile") or {}
+        login = user.get("LoginName") or ""
+        device = (node.get("ComputedName") or node.get("Name") or ip).split(".")[0]
+        if node.get("Tags") or not login or login == "tagged-devices":
+            caller = Caller(owner=device, name=device, tagged=True)
+        else:
+            caller = Caller(owner=login, name=user.get("DisplayName") or login)
+    _CACHE[ip] = (time.time(), caller)
+    return caller
+
+
+def identify(headers, client_ip: str | None, agent: str | None = None,
+             owner: str | None = None) -> Caller:
+    """The caller of an HTTP request. `headers` is a case-insensitive mapping."""
+    bearer = (headers.get("authorization") or "").removeprefix("Bearer ").strip() or None
+    agent = (agent or bearer or "").strip()[:64] or None
+    ip = client_ip or ""
+    login = headers.get("tailscale-user-login")
+    if login and ip in _LOCAL:          # set by `tailscale serve`, which proxies from localhost
+        c = Caller(owner=login, name=headers.get("tailscale-user-name") or login)
+    elif ip in _LOCAL:
+        c = Caller(owner="local", name="local", tagged=True)
+    else:
+        c = _from_whois(ip) or Caller(owner=f"ip:{ip}", name=ip, tagged=True)
+    if owner and c.tagged:
+        c = Caller(owner=owner.strip()[:64], name=owner.strip()[:64], tagged=True)
+    c.agent = agent
+    return c

@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_WIN = re.compile(r"^team ([AB]) wins after (\d+) rounds \(by ([^)]*)\)", re.M)
+_WIN = re.compile(r"^team ([AB]) wins after (\d+) rounds \((?:by )?([^)]*)\)", re.M)
 _DRAW = re.compile(r"^(?:draw|it's a draw|tie)\b.*?after (\d+) rounds(?: \(by ([^)]*)\))?", re.M | re.I)
 _DEATH = re.compile(r"^round (\d+): bot (\d+) \(team ([AB])\) died: (.+)$", re.M)
 _POINTS = re.compile(r"^team ([AB]) points per turn: p50 ([\d.]+)([KMG]?)\s+p99 ([\d.]+)([KMG]?)\s+"
@@ -80,20 +80,38 @@ def parse(log: str) -> GameResult:
 
 def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
          work_root: Path | None = None, unswbc: str = "unswbc", timeout: float = 1800) -> GameResult:
-    """Plays bot_a (team A) against bot_b (team B). Raises JudgeError when there's no verdict."""
+    """Plays bot_a (team A) against bot_b (team B). Raises JudgeError when there's no verdict.
+
+    Each bot is copied to <work>/A/<its directory name> and <work>/B/<name>: the judge's wasm
+    build cache is keyed by directory name plus source hash, so keeping the name (the
+    submission id) means a C/C++ bot compiles once, not once per game (60 s vs 10 s).
+    """
     map_path, replay_dir = map_path.resolve(), replay_dir.resolve()
     replay_dir.mkdir(parents=True, exist_ok=True)
+    if work_root:
+        work_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="game-", dir=work_root) as work:
-        a, b = Path(work, "A"), Path(work, "B")
+        a = Path(work, "A", Path(bot_a).name)
+        b = Path(work, "B", Path(bot_b).name)
         shutil.copytree(bot_a, a)
         shutil.copytree(bot_b, b)
+        out = Path(work, "replay")
         cmd = [unswbc, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
-               "-v", "-o", str(replay_dir)]
+               "-v", "-o", str(out)]
         start = time.monotonic()
-        proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout)
+        try:
+            proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout,
+                                  errors="replace")
+        except subprocess.TimeoutExpired as e:
+            raise JudgeError(f"judge timed out after {timeout:.0f}s", str(e.stdout or "")) from e
         log = proc.stdout + proc.stderr
         result = parse(log)
         result.seconds = time.monotonic() - start
-        if result.replay and not result.replay.is_absolute():
-            result.replay = Path(work, result.replay)
+        replays = sorted(out.glob("*.replay"))
+        if replays:
+            dest = replay_dir / replays[0].name
+            shutil.move(str(replays[0]), dest)
+            result.replay = dest
+        else:
+            result.replay = None
         return result
