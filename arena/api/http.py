@@ -184,6 +184,7 @@ def queue(arena: Arena) -> dict:
 
 
 def create_app(arena: Arena) -> FastAPI:
+    who.TRUST_HEADERS = bool(arena.cfg.get("api", "trust_tailscale_headers", False))
     app = FastAPI(title="tokenz-arena", version="0.1", docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
     api = APIRouter(prefix="/api/v1")

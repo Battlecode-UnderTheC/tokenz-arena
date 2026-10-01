@@ -22,6 +22,11 @@ official = [1592614637]
 rotating = [1592614637]
 holdout = [1592614637]
 
+[api]
+# The arena is reachable only through the sidecar's `tailscale serve`, which forwards with the
+# caller's tailnet IP: trust its Tailscale-User-Login header from any address.
+trust_tailscale_headers = true
+
 [server]
 key_file = "/secrets/keys.json"   # the toolkit's keys.json format (copied from the Mac)
 auto_submit = true

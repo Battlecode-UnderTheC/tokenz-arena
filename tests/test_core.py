@@ -75,3 +75,17 @@ def test_settle_and_rating(arena):
     assert q.status == "rated"
     r = rating.fit(arena)
     assert r[q.id]["elo"] > r[p.id]["elo"]
+
+
+def test_identity_from_tailscale_headers():
+    from arena import who
+    h = {"tailscale-user-login": "alice@github", "authorization": "Bearer worker-3"}
+    assert who.identify(h, "127.0.0.1").owner == "alice@github"
+    who.TRUST_HEADERS = False
+    assert who.identify(h, "100.1.2.3").owner != "alice@github"   # a forged header from outside
+    who.TRUST_HEADERS = True
+    try:
+        c = who.identify(h, "100.1.2.3")
+        assert (c.owner, c.agent) == ("alice@github", "worker-3")
+    finally:
+        who.TRUST_HEADERS = False

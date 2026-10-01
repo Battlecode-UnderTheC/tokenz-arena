@@ -37,6 +37,11 @@ def whois(ip: str) -> dict | None:
 
 
 _CACHE: dict[str, tuple[float, Caller | None]] = {}
+# True when the arena is reachable only through `tailscale serve` (the container setup: it
+# listens on 127.0.0.1 in the Tailscale sidecar's namespace). Serve then forwards with the
+# caller's tailnet IP as the source, so the headers are trusted from any address.
+# Set from [api] trust_tailscale_headers by create_app.
+TRUST_HEADERS = False
 _LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
@@ -66,7 +71,7 @@ def identify(headers, client_ip: str | None, agent: str | None = None,
     agent = (agent or bearer or "").strip()[:64] or None
     ip = client_ip or ""
     login = headers.get("tailscale-user-login")
-    if login and ip in _LOCAL:          # set by `tailscale serve`, which proxies from localhost
+    if login and (ip in _LOCAL or TRUST_HEADERS):   # set by `tailscale serve`
         c = Caller(owner=login, name=headers.get("tailscale-user-name") or login)
     elif ip in _LOCAL:
         c = Caller(owner="local", name="local", tagged=True)
