@@ -302,6 +302,14 @@ def make_router(arena) -> APIRouter:
                            for rd, ms in sorted(rounds.items())], "stale": stale}
 
     # ------------------------------------------------------------------ auto-submit control
+    @r.post("/versions/{ver}/link")
+    @guarded
+    def link(ver: str, request: Request, body: dict = Body(...)):
+        """Link a server version of ours to the arena submission it is: {"arena": "<id>"}."""
+        if not isinstance(body, dict) or not isinstance(body.get("arena"), str):
+            raise HTTPException(400, 'send JSON: {"arena": "<submission id>"}')
+        return br().link(ver, body["arena"], _caller(request))
+
     @r.post("/pause")
     def pause(request: Request, body: dict | None = Body(None)):
         br().pause(_caller(request), (body or {}).get("reason"))

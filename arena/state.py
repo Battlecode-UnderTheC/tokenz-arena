@@ -50,6 +50,8 @@ class Submission:
     warnings: list = field(default_factory=list)   # lints that don't reject (e.g. map names)
     note_history: list = field(default_factory=list)   # earlier notes: [{at, by, note}]
     parent_history: list = field(default_factory=list)  # earlier parents: [{at, by, parent}]
+    quick_opponents: list | None = None   # placement's first round: parent + top bots
+    engine: str = ""                      # the judge (rules) version it was submitted under
     opponents: list | None = None   # frozen when its draft or placement starts
 
 

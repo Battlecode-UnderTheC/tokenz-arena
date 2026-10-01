@@ -610,6 +610,33 @@ class Bridge:
             if v.get("by") == "auto-submit" and not v.get("activated") and t and time.time() - t < 3600:
                 self._activate(ver, "auto-submit (retry)")
 
+    def link(self, ver, arena_id: str, by: str) -> dict:
+        """Records that our server version `ver` is arena submission `arena_id` (for versions
+        uploaded by hand rather than by auto-submit), and re-labels the server games already
+        downloaded for it, so the gate and the pages know which bot is live."""
+        ver = str(ver)
+        s = self.arena.subs.get(arena_id)
+        if not s or s.status == "external":
+            raise Refused(f"no arena submission {arena_id!r}", 404)
+        names = {str(x.get("id")): x.get("name") for x in self.server_subs()}
+        if ver not in names:
+            raise Refused(f"no server version {ver} of ours (see GET /api/v1/server/submissions)", 404)
+        stand_in = f"{STAND_IN}{ver}"
+        with self.lock:
+            self.versions[ver] = {**self.versions.get(ver, {}), "arena": arena_id,
+                                  "name": names[ver], "by": f"linked by {by}", "linked": now()}
+            self._save("versions")
+        moved = 0
+        with self.arena.lock:
+            for g in self.arena.games:
+                if stand_in in (g.a, g.b):
+                    g.a = arena_id if g.a == stand_in else g.a
+                    g.b = arena_id if g.b == stand_in else g.b
+                    self.arena.save_game(g)
+                    moved += 1
+        self.record("link", server_version=ver, submission=arena_id, by=by, games=moved)
+        return {"server_version": ver, "name": names[ver], "arena": arena_id, "games_relabelled": moved}
+
     def pause(self, by: str, reason: str | None = None):
         with self.lock:
             self.state.update(paused=True, paused_by=by, paused_at=now(), pause_reason=reason)

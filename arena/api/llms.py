@@ -150,6 +150,7 @@ Tools wrap the endpoints above (same JSON):
   leaderboard()  bot(name)  ideas(q, bot, outcome)  games(sub, vs, map, suite, lane, result,
   limit)  game(id)  map_stats()  maps()  upload_map(text, name, note, hidden)  queue()
   edit_note(id, note)  set_parent(id, parent)  lineage(bot, root)
+  server_link(server_version, arena_id)   (POST /api/v1/server/versions/{{ver}}/link {{"arena": id}})
   server_status()  server_battles(limit)  server_battle(id)  server_leaderboard()
   server_quota()
 

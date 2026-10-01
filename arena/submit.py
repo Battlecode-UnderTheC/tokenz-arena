@@ -17,7 +17,7 @@ import zipfile
 from pathlib import Path
 
 from arena import runner
-from arena.state import CHECKING, PLACING, QUEUED, REJECTED, RETIRED, Arena, Submission, now
+from arena.state import CHECKING, ENGINE, PLACING, QUEUED, REJECTED, RETIRED, Arena, Submission, now
 
 MAX_ZIP = 4 * 1024 * 1024           # the competition server's limit
 MAX_UNPACKED = 32 * 1024 * 1024
@@ -161,7 +161,7 @@ def accept(arena: Arena, *, blob: bytes, bot: str, owner: str, note: str = "",
             arena.save_bots()
         sid = arena.next_id(bot)
         s = Submission(id=sid, bot=bot, owner=owner, lane=lane, status=CHECKING, sha256=sha,
-                       agent=agent, parent=parent, note=note or "", source=source)
+                       agent=agent, parent=parent, note=note or "", source=source, engine=ENGINE)
         arena.subs[sid] = s
         (arena.cfg.submissions / sid).mkdir(parents=True, exist_ok=True)
         (arena.cfg.submissions / sid / "source.zip").write_bytes(blob)
@@ -226,7 +226,7 @@ def make_current(arena: Arena, s: Submission, by: str | None = None):
             arena.save_sub(old)
         b["current"] = s.id
         arena.save_bots()
-        s.lane, s.status, s.opponents = "ranked", PLACING, None
+        s.lane, s.status, s.opponents, s.quick_opponents = "ranked", PLACING, None, None
         if by:
             s.promoted, s.promoted_by = now(), by
         arena.save_sub(s)

@@ -466,3 +466,21 @@ def test_routes_without_key(arena):
     assert tc.get("/api/v1/server").json()["status"] == "no key configured"
     r = tc.get("/api/v1/server/leaderboard")
     assert r.status_code == 503 and r.json()["detail"] == "no key configured"
+
+
+def test_link_server_version_relabels_games(tmp_path, monkeypatch):
+    from arena import config
+    from arena.server import bridge as bridge_mod
+    from arena.state import Arena, Game, Submission
+    cfg = config.Config(raw={"server": {"key_file": str(tmp_path / "nokey")}}, data_dir=tmp_path / "d")
+    arena = Arena(cfg)
+    s = Submission(id="gst-1", bot="gst", owner="alice", lane="ranked", status="rated", sha256="x")
+    arena.subs[s.id] = s
+    opp = arena.ensure_external("rivals")
+    arena.add_game(Game(id=0, lane="server", suite="server", map="m", seed=1,
+                        a="server-version:14246", b=opp.id, winner="A", rounds=10))
+    b = bridge_mod.get(arena)
+    monkeypatch.setattr(b, "server_subs", lambda: [{"id": 14246, "name": "gst-queen-3"}])
+    out = b.link("14246", "gst-1", "alice")
+    assert out["games_relabelled"] == 1 and arena.games[0].a == "gst-1"
+    assert b.versions["14246"]["arena"] == "gst-1"

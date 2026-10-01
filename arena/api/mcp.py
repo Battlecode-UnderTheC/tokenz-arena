@@ -306,6 +306,14 @@ def make_server(app: FastAPI) -> MCPServer:
         return await api.call(ctx, "PATCH", f"/submissions/{id}", json_body={"note": note})
 
     @mcp.tool()
+    async def server_link(ctx: Context, server_version: str, arena_id: str) -> CallToolResult:
+        """Say which arena submission one of our competition-server versions is (for versions
+        uploaded by hand, not by auto-submit). The auto-submit gate compares candidates with the
+        live bot, so it needs this; server games of that version are re-labelled too."""
+        return await api.call(ctx, "POST", f"/server/versions/{server_version}/link",
+                              json_body={"arena": arena_id})
+
+    @mcp.tool()
     async def set_parent(ctx: Context, id: str, parent: str | None) -> CallToolResult:
         """Change which submission `id` builds on (only its owner can; null for none). If it
         hasn't played the new parent yet, the arena schedules those games and the verdict
@@ -384,7 +392,7 @@ def make_server(app: FastAPI) -> MCPServer:
 
 
 TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
-         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "lineage",
+         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "server_link", "lineage",
          "queue", "server_status",
          "server_battles",
          "server_battle", "server_leaderboard", "server_quota")

@@ -207,3 +207,32 @@ def test_set_parent_reschedules_and_refuses_cycles(arena):
     assert any(q.id in (j.a, j.b) for j in scheduler.owed_for(arena, arena.subs[d.id]))
     assert c.patch(f"/api/v1/submissions/{d.id}", json={"parent": None},
                    headers={"tailscale-user-login": "bob"}).status_code == 403
+
+
+def test_quick_placement_then_low_priority_topup(arena):
+    bots = [add(arena, f"b{i}") for i in range(8)]          # each placed, now rated in turn
+    for b in bots[:-1]:
+        b.status = "rated"
+    new = add(arena, "b0", parent=bots[0].id)               # replaces b0, placing
+    jobs = scheduler.owed_for(arena, new)
+    opps = {j.a if j.b == new.id else j.b for j in jobs}
+    assert bots[0].id in opps and len(opps) <= 1 + 5        # parent + top 5
+    assert {j.priority for j in jobs} == {scheduler.PLACEMENT}
+    new.status = "rated"
+    later = scheduler.owed_for(arena, new)
+    assert {j.priority for j in later} == {scheduler.CONTINUOUS}
+    assert len({j.a if j.b == new.id else j.b for j in later}) > len(opps)
+
+
+def test_verdict_splits_by_how_games_ended(arena):
+    from arena import report
+    p = add(arena, "base")
+    d = add(arena, "base", lane="draft", parent=p.id)
+    scheduler.owed_for(arena, d)
+    seed = arena.cfg.seeds("official")[0]
+    for reason, winner in (("elimination", "A"), ("longer queen, 3 to 1", "B"), ("longest dragon, 9 to 4", "A")):
+        arena.add_game(Game(id=0, lane="draft", suite="official", map="one", seed=seed, a=d.id,
+                            b=p.id, winner=winner, rounds=500, reason=reason))
+    vp = report.verdict(arena, d.id)["vs_parent"]
+    assert vp["by_end"]["longer queen"]["L"] == 1 and vp["by_end"]["elimination"]["W"] == 1
+    assert vp["server_maps"] is None

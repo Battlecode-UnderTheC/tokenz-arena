@@ -130,9 +130,20 @@ def owed_for(arena: Arena, s) -> list[Job]:
                            DRAFT)
     if s.status in (PLACING, RATED):
         if s.status == PLACING and s.opponents is None:
+            top_n = arena.cfg.get("play", "placement_quick_top", 5)
+            quick = [x for x in ranking(arena) if x not in (s.parent, s.id)][:top_n]
+            s.quick_opponents = [o for o in dict.fromkeys(([s.parent] if s.parent else []) + quick)
+                                 if o != s.id]
             _freeze(arena, s, ([s.parent] if s.parent else []) + [c.id for c in arena.current()])
+        if s.status == PLACING:
+            # Quick placement: parent and the top bots on the draft maps, at placement priority.
+            # Once those are played it's rated, and the rest (everyone, every placement map)
+            # tops up below drafts, so a new ranked bot never blocks the queue.
+            return _suite_jobs(arena, s, s.quick_opponents if s.quick_opponents is not None
+                               else s.opponents or [],
+                               arena.cfg.get("play", "draft_suites", DRAFT_SUITES), PLACEMENT)
         return _suite_jobs(arena, s, s.opponents or [],
-                           arena.cfg.get("play", "placement_suites", PLACEMENT_SUITES), PLACEMENT)
+                           arena.cfg.get("play", "placement_suites", PLACEMENT_SUITES), CONTINUOUS)
     return []
 
 

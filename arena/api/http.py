@@ -221,6 +221,8 @@ def set_parent(arena: Arena, sid: str, parent: str | None, by: str) -> object:
             return s
         s.parent_history.append({"at": now(), "by": by, "parent": s.parent})
         s.parent = parent
+        if parent and s.quick_opponents is not None and parent not in s.quick_opponents:
+            s.quick_opponents = [parent] + s.quick_opponents
         if parent and s.opponents is not None and parent not in s.opponents:
             s.opponents = [parent] + s.opponents     # the verdict needs games against it
             if s.status == _DONE:

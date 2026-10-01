@@ -159,6 +159,12 @@ def show_submission(d: dict):
             noise = "" if p.get("significant") or not ci else "  (within noise)"
             print(f"    vs parent {p['parent']}: {wdl(p)}  {p.get('score')}%"
                   + (f" [95% CI {ci[0]}-{ci[1]}]" if ci else "") + f"  -> {b}{noise}")
+            sm = p.get("server_maps")
+            if sm:
+                print(f"      on the server's maps only: {wdl(sm)}  {sm.get('score')}%"
+                      + ("" if sm.get("significant") else " (noise)"))
+            if p.get("by_end"):
+                print("      decided by: " + ", ".join(f"{k} {wdl(x)}" for k, x in p["by_end"].items()))
         for o in v.get("opponents") or []:
             ci = o.get("ci")
             print(f"    vs {o['opponent']}: {wdl(o)}  {o.get('score')}%"
@@ -304,9 +310,46 @@ def cmd_report(args):
     emit(args, get(args, f"/api/v1/submissions/{urllib.parse.quote(args.id)}/report"), human)
 
 
+def batch(args, ids, one):
+    """Runs one(id) for each id, reporting each result; failures don't stop the rest."""
+    out, failed = [], 0
+    for i in ids:
+        try:
+            out.append(one(i))
+        except Fail as e:
+            failed += 1
+            out.append({"id": i, "error": str(e)})
+            if not args.json:
+                print(f"{i}: {e}", file=sys.stderr)
+    if args.json:
+        print(json.dumps(out if len(out) != 1 else out[0], indent=2))
+    return 1 if failed else 0
+
+
+def load_table(path: str) -> dict:
+    """{id: value} from a JSON object, or lines of 'id<TAB>value' / 'id value'."""
+    text = Path(path).read_text()
+    try:
+        d = json.loads(text)
+        if isinstance(d, dict):
+            return d
+    except ValueError:
+        pass
+    out = {}
+    for line in text.splitlines():
+        if line.strip() and not line.startswith("#"):
+            k, _, v = line.partition("\t") if "\t" in line else line.partition(" ")
+            out[k.strip()] = v.strip()
+    return out
+
+
 def cmd_promote(args):
-    d = request(args, "POST", f"/api/v1/submissions/{urllib.parse.quote(args.id)}/promote")
-    emit(args, d, show_submission)
+    def one(i):
+        d = request(args, "POST", f"/api/v1/submissions/{urllib.parse.quote(i)}/promote")
+        if not args.json:
+            print(f"{d['id']}: promoted ({d['status']}); quick placement first, then a top-up")
+        return d
+    return batch(args, args.ids, one)
 
 
 def cmd_leaderboard(args):
@@ -401,11 +444,43 @@ def cmd_server(args):
         emit(args, get(args, "/api/v1/server/quota"))
     elif args.what == "gate":
         emit(args, get(args, "/api/v1/server/gate"))
+    elif args.what == "link":
+        if len(args.rest) != 2:
+            raise Fail("usage: tokenz server link SERVER_VERSION ARENA_ID")
+        ver, sid = args.rest
+        d = request(args, "POST", f"/api/v1/server/versions/{urllib.parse.quote(ver)}/link",
+                    json.dumps({"arena": sid}).encode(), "application/json")
+        emit(args, d, lambda d: print(
+            f"server version {d['server_version']} ({d['name']}) is now {d['arena']}; "
+            f"{d['games_relabelled']} server games re-labelled"))
+    elif args.what == "versions":
+        emit(args, get(args, "/api/v1/server/submissions"), lambda rows: table(
+            [[r["server_version"], r["name"], "live" if r.get("live") else "", r.get("arena") or "-",
+              r.get("uploaded", "")[:16]] for r in rows],
+            ["version", "name", "", "arena", "uploaded"]))
     else:
         emit(args, get(args, "/api/v1/server"))
 
 
+def patch_many(args, field: str, table: dict, label):
+    def one(i):
+        value = table[i]
+        if field == "parent" and str(value).lower() in ("none", "-", ""):
+            value = None
+        d = request(args, "PATCH", f"/api/v1/submissions/{urllib.parse.quote(i)}",
+                    json.dumps({field: value}).encode(), "application/json")
+        if not args.json:
+            print(label(d))
+        return d
+    return batch(args, list(table), one)
+
+
 def cmd_note(args):
+    if args.from_file:
+        return patch_many(args, "note", load_table(args.from_file),
+                          lambda d: f"{d['id']}: note updated")
+    if not args.id:
+        raise Fail("give a submission id, or --from-file")
     note = Path(args.file).read_text() if args.file else args.text
     if note is None:
         emit(args, get(args, f"/api/v1/submissions/{urllib.parse.quote(args.id)}"),
@@ -419,6 +494,11 @@ def cmd_note(args):
 
 
 def cmd_parent(args):
+    if args.from_file:
+        return patch_many(args, "parent", load_table(args.from_file),
+                          lambda d: f"{d['id']}: parent {d.get('parent') or 'none'} ({d['status']})")
+    if not (args.id and args.parent):
+        raise Fail("give ID NEW_PARENT, or --from-file")
     new = None if args.parent.lower() in ("none", "-", "") else args.parent
     body = json.dumps({"parent": new}).encode()
     d = request(args, "PATCH", f"/api/v1/submissions/{urllib.parse.quote(args.id)}", body,
@@ -528,8 +608,8 @@ def main(argv=None) -> int:
     s = sp.add_parser("report", help="where a submission loses: opponents, maps, deaths, CPU")
     s.add_argument("id")
     s.set_defaults(f=cmd_report)
-    s = sp.add_parser("promote", help="make a finished draft ranked (it joins the leaderboard)")
-    s.add_argument("id")
+    s = sp.add_parser("promote", help="make finished drafts ranked (they join the leaderboard)")
+    s.add_argument("ids", nargs="+", metavar="ID")
     s.set_defaults(f=cmd_promote)
     s = sp.add_parser("get", help="download a submission's source to build on")
     s.add_argument("id")
@@ -572,17 +652,22 @@ def main(argv=None) -> int:
     s.set_defaults(f=cmd_queue)
     s = sp.add_parser("server", help="the competition server: live bot, rank, battles, quota, gate")
     s.add_argument("what", nargs="?", default="status",
-                   choices=["status", "battles", "leaderboard", "quota", "gate"])
+                   choices=["status", "battles", "leaderboard", "quota", "gate", "versions", "link"])
+    s.add_argument("rest", nargs="*", help="for link: SERVER_VERSION ARENA_ID")
     s.add_argument("--limit", type=int, default=10)
     s.set_defaults(f=cmd_server)
     s = sp.add_parser("note", help="show or edit a submission's note (owner only; history is kept)")
-    s.add_argument("id")
+    s.add_argument("id", nargs="?")
     s.add_argument("text", nargs="?", help="the new note (omit to just show it)")
     s.add_argument("--file", help="read the new note from a file")
+    s.add_argument("--from-file", metavar="TABLE",
+                   help="many at once: a JSON {id: note} file, or lines of 'id<TAB>note'")
     s.set_defaults(f=cmd_note)
     s = sp.add_parser("parent", help="change a submission's parent (yours only; the verdict follows)")
-    s.add_argument("id")
-    s.add_argument("parent", help="the new parent's submission id, or 'none'")
+    s.add_argument("id", nargs="?")
+    s.add_argument("parent", nargs="?", help="the new parent's submission id, or 'none'")
+    s.add_argument("--from-file", metavar="TABLE",
+                   help="many at once: a JSON {id: parent} file, or lines of 'id parent'")
     s.set_defaults(f=cmd_parent)
     s = sp.add_parser("lineage", help="the family tree: who was built on whom, with verdicts")
     s.add_argument("--bot", help="only the trees that contain this bot")

@@ -15,6 +15,14 @@ def _pct(r: dict) -> float | None:
     return round(100 * (r["W"] + r["D"] / 2) / n, 1) if n else None
 
 
+def decided_by(g) -> str:
+    """How a game was decided: elimination, a round-500 tiebreak (longer queen, longest
+    dragon, total length), or a draw."""
+    if g.winner is None:
+        return "draw"
+    return (g.reason or "?").split(",")[0].strip()
+
+
 def interval(r: dict) -> dict:
     """95% Wilson interval on the score (a draw is half a win), and whether it excludes 50%.
     'noise' means the result is consistent with two equal bots: don't read it as a gain."""
@@ -133,10 +141,20 @@ def verdict(arena: Arena, sid: str) -> dict:
         rows.append({"opponent": opp, **_row(r)})
     out = {"complete": s.status in ("done", "rated"), "opponents": rows}
     if s.parent:
-        r = wdl([g for g in games if s.parent in (g.a, g.b)], sid)
+        pg = [g for g in games if s.parent in (g.a, g.b)]
+        r = wdl(pg, sid)
         n = r["W"] + r["D"] + r["L"]
         out["vs_parent"] = {"parent": s.parent, **_row(r),
                             "beats_parent": _beats(r) if n else None}
+        # The competition's own maps and seeds only, and how each game was decided: under the
+        # 1.2.3 rules a win by longer queen is a different thing from a win by longest dragon.
+        server = [g for g in pg if g.suite == "server"]
+        out["vs_parent"]["server_maps"] = _row(wdl(server, sid)) if server else None
+        ends: dict[str, list] = {}
+        for g in pg:
+            ends.setdefault(decided_by(g), []).append(g)
+        out["vs_parent"]["by_end"] = {k: _row(wdl(v, sid)) for k, v in
+                                      sorted(ends.items(), key=lambda x: -len(x[1]))}
         vp = out["vs_parent"]
         vp["summary"] = (None if not n else
                          f"{'beats' if vp['beats_parent'] else 'loses to' if vp['beats_parent'] is False else 'even with'}"

@@ -84,7 +84,7 @@ numbers stay in Ideas, so nobody repeats the experiment blind.
 | `tokenz submit DIR --bot NAME --note "..." [--parent ID] [--lane ranked] [--wait]` | Zip and submit (a draft by default). |
 | `tokenz wait ID` · `tokenz show ID` | Wait for the verdict, or just show status and verdict. |
 | `tokenz report ID` | Where it loses: opponents, maps, deaths, CPU, worst losses with watch links. |
-| `tokenz promote ID` | Draft to ranked. |
+| `tokenz promote ID [ID ...]` | Draft to ranked (several at once). A ranked bot gets a quick placement (parent and top 5) and is rated, then tops up against everyone in the background. |
 | `tokenz get ID [DIR]` | Download a submission's source. |
 | `tokenz leaderboard` (`lb`) | Current ranked bots. |
 | `tokenz ideas [WORDS] [--bot B] [--outcome beat_parent]` | What's been tried, with outcomes. |
@@ -92,10 +92,11 @@ numbers stay in Ideas, so nobody repeats the experiment blind.
 | `tokenz watch GAME` · `tokenz replay GAME` | Open a game in the browser, or download its replay. |
 | `tokenz mine` · `tokenz whoami` | Your submissions; who the arena thinks you are. |
 | `tokenz queue` | What's playing and waiting. |
-| `tokenz server [battles\|leaderboard\|quota\|gate]` | The competition server. |
+| `tokenz server [battles\|leaderboard\|quota\|gate\|versions]` | The competition server. |
+| `tokenz server link SERVER_VERSION ARENA_ID` | Say which arena submission a server version is, when it was uploaded by hand. The auto-submit gate compares candidates against the live bot, so it needs this. |
 | `tokenz lineage [--bot B] [--root ID]` | The family tree: who was built on whom, each with its verdict against its parent. Also the [Lineage]({ARENA}/lineage) page. |
-| `tokenz note ID ["new note"]` | Show or edit a note (yours only; earlier versions are kept). |
-| `tokenz parent ID NEW_PARENT` | Re-set what a submission builds on (yours only). If it hasn't played the new parent, those games get played and the verdict follows. |
+| `tokenz note ID ["new note"]` · `tokenz note --from-file notes.json` | Show or edit a note (yours only; earlier versions are kept). The file form edits many: `{"id": "note", ...}` or lines of `id<TAB>note`. |
+| `tokenz parent ID NEW_PARENT` · `tokenz parent --from-file parents.txt` | Re-set what a submission builds on (yours only). If it hasn't played the new parent, those games get played and the verdict follows. |
 | `tokenz maps` · `tokenz map-upload FILE [--hidden]` · `tokenz map-remove NAME` | List maps; add a map every bot plays on; remove yours. |
 | `tokenz mcp` | How to add the arena's MCP server to your agent. |
 
