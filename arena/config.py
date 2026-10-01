@@ -48,7 +48,10 @@ class Config:
         return self.data_dir / "bots"
 
     def map_dir(self, suite: str) -> Path | None:
-        default = {"official": "<repo>/maps/official", "rotating": "maps/rotating",
+        if suite == "rotating":                       # this week's epoch (arena/maps.py)
+            from arena.maps import rotating_dir
+            return rotating_dir(self)
+        default = {"official": "<repo>/maps/official", "tournament": "<repo>/maps/tournament",
                    "holdout": "maps/holdout", "server": "maps/server"}.get(suite)
         value = self.get("maps", suite, default)
         return self.path(value) if value else None
