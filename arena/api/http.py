@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from arena import report, scheduler, submit, who
 from arena.config import ROOT
-from arena.state import DONE, RATED, REJECTED, Arena, result_for, wdl
+from arena.state import DONE, HIDDEN_SUITES, RATED, REJECTED, Arena, is_rated, result_for, wdl
 from arena.web import viewer
 
 FINAL = {DONE, RATED, REJECTED, "retired"}
@@ -58,8 +58,7 @@ def leaderboard(arena: Arena) -> list[dict]:
     ratings = getattr(arena, "ratings", {}) or {}
     for rank, sid in enumerate(scheduler.ranking(arena), 1):
         s = arena.subs[sid]
-        games = [g for g in arena.games_of(sid)
-                 if g.suite in ("official", "rotating") and g.a != g.b]
+        games = [g for g in arena.games_of(sid) if is_rated(g)]
         r = wdl(games, sid)
         n = sum(r.values())
         hold = [g for g in arena.games_of(sid) if g.suite == "holdout"]
@@ -80,7 +79,7 @@ def bot_detail(arena: Arena, bot: str) -> dict | None:
     cur = b.get("current")
     h2h = []
     if cur:
-        games = [g for g in arena.games_of(cur) if g.a != g.b and g.suite in ("official", "rotating")]
+        games = [g for g in arena.games_of(cur) if is_rated(g)]
         opps = {g.b if g.a == cur else g.a for g in games}
         for o in sorted(opps):
             r = wdl([g for g in games if o in (g.a, g.b)], cur)
@@ -123,6 +122,8 @@ def find_games(arena: Arena, sub: str | None = None, vs: str | None = None,
     """GET /api/v1/games: matching Game objects, newest first."""
     out = []
     for g in reversed(arena.games):
+        if g.suite == "holdout":          # hidden: only aggregate W-D-L is ever shown
+            continue
         if sub and sub not in (g.a, g.b):
             continue
         if vs and vs not in (g.a, g.b):
@@ -138,9 +139,10 @@ def find_games(arena: Arena, sub: str | None = None, vs: str | None = None,
 
 
 def find_game(arena: Arena, gid: int):
+    """A game by id; holdout games are hidden (None), so their maps and replays never leak."""
     for g in reversed(arena.games):
         if g.id == gid:
-            return g
+            return None if g.suite == "holdout" else g
     return None
 
 

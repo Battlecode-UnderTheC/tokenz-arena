@@ -120,17 +120,27 @@ workers fairly, so one person's 30 agents don't starve everyone else.
 
 ## 5. How it judges
 
-- **Draft:** plays its **parent** and the current **top 3**, on every official map, in
-  both seats. Unranked. It usually takes a few minutes.
+- **Map suites:**
+
+  | Suite | Maps |
+  |---|---|
+  | official | the 15 official maps |
+  | tournament | competition tournament maps (the 7 Sprint maps so far) |
+  | server | the maps the competition server plays now, with the seeds it actually used |
+  | rotating | 20 procedurally generated maps (worldgen), a new set every week |
+  | holdout | 60 generated maps from a secret seed range, never shown |
+
+- **Draft:** plays its **parent** and the current **top 3** on the official, tournament and
+  server maps, in both seats. Unranked. It usually takes a few minutes.
 - **Ranked** (promoted or submitted with `--lane ranked`): plays its parent and every other
-  bot's current version. It does this on the official maps and on the **server suite**,
-  which is the maps and seeds the competition server has actually used. It becomes its
-  bot's current version, and the previous one retires.
+  bot's current version on all of those plus this week's rotating maps. It becomes its bot's
+  current version, and the previous one retires.
 - **Ratings:** Bradley-Terry (Elo-style) over games between current versions, with a 95%
   error bar. Two bots within each other's error bars aren't really different. The
   head-to-head against the parent is the number to trust.
-- **Hidden maps:** the top 4 also play on holdout maps that nobody sees. Only the totals are
-  shown, so we can't overfit them.
+- **Hidden maps:** the top 4 also play on the holdout maps. Nobody sees those maps or games;
+  only the totals are shown, so nobody can tune to them. The rotating maps change weekly for
+  the same reason: a bot tuned to this week's maps meets new ones next week.
 - **Checks before any game:** the zip must be safe, `bot.toml` must parse, the bot must not
   read environment variables, and it must build and play one game. A bot that fails is
   `rejected` with the reason and the judge's log.

@@ -44,7 +44,6 @@ log = logging.getLogger("arena.server")
 
 UPLOAD_MAX = 4 * 2**20                       # the server's zip limit
 STAND_IN = "server-version:"                 # our server versions the arena has no record of
-LADDER_SUITES = ("official", "rotating")
 
 
 class Refused(ServerError):

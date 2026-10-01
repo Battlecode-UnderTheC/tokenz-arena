@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from arena import store
-from arena.state import DONE, PLACING, PLAYING, QUEUED, RATED, REJECTED, EXTERNAL, Arena
+from arena.state import is_rated, DONE, PLACING, PLAYING, QUEUED, RATED, REJECTED, EXTERNAL, Arena
 
 DRAFT, PLACEMENT, HOLDOUT, CONTINUOUS = 0, 1, 2, 3
 LANES = {DRAFT: "draft", PLACEMENT: "placement", HOLDOUT: "holdout", CONTINUOUS: "continuous"}
@@ -84,27 +84,55 @@ def _pairings(arena: Arena, sub: str, opponents: list[str], suite: str, seeds: l
     return out
 
 
+DRAFT_SUITES = ["official", "tournament", "server"]
+PLACEMENT_SUITES = ["official", "tournament", "server", "rotating"]
+CONTINUOUS_SUITES = ["official", "tournament", "rotating"]
+
+
+def suite_seeds(arena: Arena, suite: str, m: Path) -> list[int]:
+    """Seeds for one map: the server suite uses the seeds seen on the competition server for
+    that map (the first [server] suite_seeds of them); other suites the first configured seed."""
+    if suite == "server":
+        per_map = arena.cfg.get("server", "suite_seeds", 2)
+        seen = server_seeds(arena).get(m.stem, [])[:per_map]
+        if seen:
+            return seen
+    return arena.cfg.seeds(suite)[:1]
+
+
+def _suite_jobs(arena: Arena, s, opponents: list[str], suites: list[str], priority: int) -> list[Job]:
+    jobs = []
+    for suite in suites:
+        for m in maps(arena, suite):
+            for seed in suite_seeds(arena, suite, m):
+                for opp in dict.fromkeys(opponents):
+                    if opp == s.id or not _usable(arena, opp):
+                        continue
+                    jobs.append(Job(priority, s.id, opp, suite, str(m), seed, s.owner, s.id))
+                    jobs.append(Job(priority, opp, s.id, suite, str(m), seed, s.owner, s.id))
+    return jobs
+
+
 def owed_for(arena: Arena, s) -> list[Job]:
-    """Every game submission s is still owed (its draft or placement set), played or not."""
-    seed = arena.cfg.seeds("official")[:1]
+    """Every game submission s is still owed (its draft or placement set), played or not.
+
+    Drafts play their parent and the top bots on [play] draft_suites (default: official,
+    tournament and server maps); ranked submissions play everyone on [play] placement_suites
+    (default adds this week's rotating worldgen maps). The server suite, the maps and seeds the
+    competition server actually uses, means a bot that only wins on our maps shows it before
+    it goes live."""
     if s.lane == "draft" and s.status in (QUEUED, PLAYING, DONE):
         if s.opponents is None:
             top_n = arena.cfg.get("play", "draft_top_n", 3)
             top = [x for x in ranking(arena) if x not in (s.parent, s.id)][:top_n]
             _freeze(arena, s, ([s.parent] if s.parent else []) + top)
-        return _pairings(arena, s.id, s.opponents, "official", seed, DRAFT, s.owner)
+        return _suite_jobs(arena, s, s.opponents, arena.cfg.get("play", "draft_suites", DRAFT_SUITES),
+                           DRAFT)
     if s.status in (PLACING, RATED):
         if s.status == PLACING and s.opponents is None:
             _freeze(arena, s, ([s.parent] if s.parent else []) + [c.id for c in arena.current()])
-        # The server suite (maps and seeds seen on the competition server) joins placement,
-        # so a bot that only wins on our maps shows it before it goes live.
-        jobs = _pairings(arena, s.id, s.opponents or [], "official", seed, PLACEMENT, s.owner)
-        per_map = arena.cfg.get("server", "suite_seeds", 2)
-        for m in maps(arena, "server"):
-            seeds = server_seeds(arena).get(m.stem, [])[:per_map] or arena.cfg.seeds("server")[:1]
-            jobs += [j for j in _pairings(arena, s.id, s.opponents or [], "server", seeds,
-                                          PLACEMENT, s.owner) if Path(j.map).stem == m.stem]
-        return jobs
+        return _suite_jobs(arena, s, s.opponents or [],
+                           arena.cfg.get("play", "placement_suites", PLACEMENT_SUITES), PLACEMENT)
     return []
 
 
@@ -129,7 +157,7 @@ def _continuous(arena: Arena, taken: set) -> list[Job]:
     ratings = getattr(arena, "ratings", {}) or {}
     met: dict[frozenset, int] = {}
     for g in arena.games:
-        if g.suite in ("official", "rotating"):
+        if is_rated(g):
             k = frozenset((g.a, g.b))
             met[k] = met.get(k, 0) + 1
     pairs = []
@@ -138,7 +166,7 @@ def _continuous(arena: Arena, taken: set) -> list[Job]:
             gap = abs((ratings.get(a, {}).get("elo") or 1500) - (ratings.get(b, {}).get("elo") or 1500))
             pairs.append((met.get(frozenset((a, b)), 0) + gap / 50, a, b))
     for _, a, b in sorted(pairs):
-        for suite in ("official", "rotating"):
+        for suite in arena.cfg.get("play", "continuous_suites", CONTINUOUS_SUITES):
             for seed in arena.cfg.seeds(suite):
                 jobs = [j for j in _pairings(arena, a, [b], suite, [seed], CONTINUOUS, "arena")
                         if j.key not in taken]

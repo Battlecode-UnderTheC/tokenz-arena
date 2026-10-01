@@ -26,7 +26,8 @@ def arena(tmp_path):
     maps.mkdir()
     for m in ("one", "two"):
         (maps / f"{m}.map").write_text("MAP 4 4\n")
-    cfg = config.Config(raw={"maps": {"official": str(maps)}}, data_dir=tmp_path / "data")
+    cfg = config.Config(raw={"maps": {"official": str(maps), "tournament": str(tmp_path / "none"),
+                                      "worldgen": False}}, data_dir=tmp_path / "data")
     return Arena(cfg)
 
 
@@ -102,3 +103,28 @@ def test_placement_plays_server_maps_on_their_own_seeds(arena):
     jobs = [j for j in scheduler.owed_for(arena, q) if j.suite == "server"]
     assert sorted({j.seed for j in jobs}) == [11, 22]          # suite_seeds defaults to 2
     assert len(jobs) == 2 * 2                                  # 2 seeds x 2 seats vs base
+
+
+def test_suites_from_config_and_holdout_hidden(arena):
+    from arena.api import http
+    tour = arena.cfg.data_dir / "tour"
+    tour.mkdir(parents=True)
+    (tour / "maze.map").write_text("MAP 4 4\n")
+    arena.cfg.raw["maps"]["tournament"] = str(tour)
+    p = add(arena, "base")
+    d = add(arena, "base", lane="draft", parent=p.id)
+    suites = {j.suite for j in scheduler.owed_for(arena, d)}
+    assert suites == {"official", "tournament"}
+    arena.cfg.raw.setdefault("play", {})["draft_suites"] = ["official"]
+    d2 = add(arena, "other", lane="draft", parent=p.id)
+    assert {j.suite for j in scheduler.owed_for(arena, d2)} == {"official"}
+    g = arena.add_game(Game(id=0, lane="holdout", suite="holdout", map="h123", seed=1, a=p.id,
+                            b=d.id, winner="A", rounds=500))
+    assert http.find_game(arena, g.id) is None
+    assert all(x.suite != "holdout" for x in http.find_games(arena, limit=100))
+
+
+def test_rotating_epochs():
+    from arena import maps
+    assert maps.epoch(maps.EPOCH_START + 6 * 86400) == 0
+    assert maps.epoch(maps.EPOCH_START + 7 * 86400) == 1

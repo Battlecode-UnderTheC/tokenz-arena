@@ -145,6 +145,17 @@ class Arena:
             return self.subs[sid]
 
 
+RATED_LANES = {"draft", "placement", "continuous"}
+HIDDEN_SUITES = {"holdout", "check"}     # never in ratings, listings or replays
+
+
+def is_rated(g: Game) -> bool:
+    """A local game between two submissions on a public suite (official, tournament, server,
+    rotating): what ratings, records and head-to-heads count. Real server games (lane
+    'server'), checks and the hidden holdout don't count."""
+    return g.lane in RATED_LANES and g.suite not in HIDDEN_SUITES and not g.error and g.a != g.b
+
+
 def result_for(g: Game, sid: str) -> str | None:
     """'W', 'D' or 'L' for sid in game g (None if the game errored)."""
     if g.error:

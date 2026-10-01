@@ -169,9 +169,20 @@ POST /api/v1/submissions          (no auth: the caller is known from Tailscale)
   Real bots going 500 rounds cost more, and the first job on poscatgpu2 is to measure that
   with our strongest C++ bot. The worker count and the draft size follow from that number.
   The 28 cores should allow 6 to 9 parallel games.
-- **Maps:** `maps/official/` (the official maps) and `maps/rotating/` (worldgen, refreshed
-  weekly, public). The holdout pool lives only in the data directory. Each game records the
-  map's suite, name and hash.
+- **Maps** (`arena/maps.py`, the same scheme as the syeyoung-tokens league):
+
+  | Suite | Maps | Played in |
+  |---|---|---|
+  | official | the official maps (`maps/official/`) | drafts, placement, continuous |
+  | tournament | tournament maps rebuilt from replays (`maps/tournament/`) | drafts, placement, continuous |
+  | server | the maps in play on the competition server, with their real seeds (the bridge keeps them current) | drafts, placement |
+  | rotating | 20 worldgen maps per weekly epoch (`data/maps/rotating/e<N>`) | placement, continuous |
+  | holdout | 60 worldgen maps from a secret seed range (`data/maps/holdout`) | the top 4 only; never listed or served |
+
+  `worldgen.py` (xCirno1's generator) has no license, so it isn't in this repo. The arena
+  downloads it from the gist at a pinned revision and checks its sha256. Suites per lane are
+  configurable (`[play] draft_suites`, `placement_suites`, `continuous_suites`). Ratings count
+  every local game on a public suite (`state.is_rated`).
 - **Seeds:** both seats on the same map and seed. Seeds come from a fixed list per suite,
   so results stay comparable over time.
 

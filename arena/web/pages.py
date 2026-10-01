@@ -535,8 +535,8 @@ document.getElementById("promote").onclick = async (ev) => {{
 <label>submission<input name="sub" value="{e(sub)}" list="subs" placeholder="any"></label>
 <label>vs<input name="vs" value="{e(vs)}" list="subs" placeholder="any"></label>
 <label>map<select name="map">{opt(maps_, map)}</select></label>
-<label>suite<select name="suite">{opt(["official", "rotating", "holdout", "server", "check"], suite)}</select></label>
-<label>lane<select name="lane">{opt(["draft", "placement", "holdout", "continuous", "check", "server"], lane)}</select></label>
+<label>suite<select name="suite">{opt(["official", "tournament", "server", "rotating", "check"], suite)}</select></label>
+<label>lane<select name="lane">{opt(["draft", "placement", "continuous", "check", "server"], lane)}</select></label>
 <label>result (for submission)<select name="result">{opt(["W", "D", "L"], result)}</select></label>
 <label>limit<input name="limit" value="{limit}" size="4"></label>
 <button type="submit">Filter</button> <a href="/games">clear</a>
@@ -608,7 +608,7 @@ watched; its verdict and stats are below.</p>
                          f'<a href="/games?map={q(m["map"])}&suite={q(m["suite"])}">games</a>'])
         played = {(m["suite"], m["map"]) for m in http.map_stats(arena)}
         unplayed = []
-        for suite in ("official", "rotating"):
+        for suite in ("official", "tournament", "server", "rotating"):
             d = arena.cfg.map_dir(suite)
             for p in sorted(d.glob("*.map")) if d and d.is_dir() else []:
                 if (suite, p.stem) not in played:

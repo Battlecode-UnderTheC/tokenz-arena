@@ -37,6 +37,11 @@ class Daemon:
         arena.ratings = store.read_json(cfg.data_dir / "ratings.json", {}) or {}
         arena.daemon = self
 
+    def install_maps(self):
+        """Keeps the worldgen suites current: this week's rotating maps and the holdout."""
+        from arena import maps
+        self.every(3600, lambda: maps.ensure_all(self.arena.cfg), "maps")
+
     def every(self, seconds: float, fn: Callable[[], None], name: str):
         """Registers a periodic task (run in its own thread so it never blocks games)."""
         self.tasks.append((seconds, fn, name))

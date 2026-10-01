@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import math
 
-from arena.state import Arena
+from arena.state import Arena, is_rated
 
-RATED_SUITES = {"official", "rotating"}
 SCALE = 400 / math.log(10)
 
 
@@ -21,8 +20,7 @@ def fit(arena: Arena) -> dict[str, dict]:
         current = [s.id for s in arena.current()]
         ids = set(current)
         games = [g for g in arena.games
-                 if g.suite in RATED_SUITES and not g.error and g.a in ids and g.b in ids
-                 and g.a != g.b]
+                 if is_rated(g) and g.a in ids and g.b in ids]
         ref = arena.bots.get(arena.cfg.get("play", "reference_bot") or "", {}).get("current")
     if not current:
         return {}

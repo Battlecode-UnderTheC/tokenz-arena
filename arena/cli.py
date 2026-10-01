@@ -33,6 +33,8 @@ def _serve(args: argparse.Namespace) -> int:
     cfg = config.load(Path(args.config) if args.config else None)
     arena = Arena(cfg)
     daemon = Daemon(arena)
+    if cfg.get("maps", "worldgen", True):
+        daemon.install_maps()
     try:
         from arena.server import bridge
         if hasattr(bridge, "install"):
