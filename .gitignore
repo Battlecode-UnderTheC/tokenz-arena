@@ -6,3 +6,4 @@ arena.toml
 *.replay
 .env
 !tests/data/*.replay
+.deployed
