@@ -109,6 +109,8 @@ POST /api/v1/submissions          (no auth: the caller is known from Tailscale)
              note = "..."         the hypothesis and what changed (markdown)
              source = "<url>"     optional: the bot's directory at a commit on GitHub
              lane = "draft"       draft (default) | ranked
+             agent = "worker-3"   optional label: which of the teammate's agents
+             owner = "<name>"     only from tagged devices without a Tailscale user login
 -> 202 {"id": "swarm-7", "status": "checking", "url": "/api/v1/submissions/swarm-7"}
 ```
 
@@ -239,7 +241,7 @@ page for agents.
 
 **MCP** (`/mcp`, streamable HTTP) wraps the same endpoints as tools: `submit` (takes a
 directory path or base64 zip), `submission`, `wait`, `promote`, `report`, `leaderboard`,
-`ideas`, `games`, `game`, `map_stats`, `queue`.
+`ideas`, `games`, `game`, `map_stats`, `queue`, `server_status`.
 
 ## 7. The website (for people)
 
