@@ -15,7 +15,10 @@ order in `DESIGN.md`.
 | `arena/runner.py` | One game with the official judge, parsed (working). |
 | `arena/store.py` | JSON files, one per record, atomic writes. No database. |
 | `arena/submit.py`, `scheduler.py`, `stats.py`, `rating.py`, `report.py`, `daemon.py` | Submission checks, scheduling, stats, ratings, reports, the worker loop (stubs). |
-| `arena/api/http.py`, `arena/api/mcp.py` | The HTTP API and MCP tools (stubs). |
+| `arena/api/http.py` | The HTTP API. |
+| `arena/api/mcp.py` | MCP tools at `/mcp` (streamable HTTP), thin wrappers that call the HTTP API in-process as the same caller. |
+| `arena/api/llms.py` | `GET /llms.txt`: the whole API on one page for agents, with live numbers. |
+| `docs/AGENTS.md` | The brief for teammates' worker agents: the loop and the rules. |
 | `arena/web/viewer.py` | The toolkit's replay viewer in a plain browser page (working). |
 | `arena/cli.py` | The `arena` command. |
 | `maps/official/` | The official maps. The holdout pool lives only in the data directory. |
