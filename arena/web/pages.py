@@ -924,9 +924,16 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
             return '<p class="muted">nothing yet</p>'
         W, H, GX, GY = 168, 24, 34, 8
         pos, y_next = {}, [0]
+        latest: dict[str, str] = {}
+
+        def newest(n) -> str:          # the latest activity in a subtree: newest lines go on top
+            latest[n["id"]] = max([n["created"]] + [newest(c) for c in n["children"]])
+            return latest[n["id"]]
+        for n in forest:
+            newest(n)
 
         def place(n, depth):
-            kids = sorted(n["children"], key=lambda c: c["created"])
+            kids = sorted(n["children"], key=lambda c: latest[c["id"]], reverse=True)
             for c in kids:
                 place(c, depth + 1)
             if kids:
@@ -935,7 +942,7 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
                 y = y_next[0]
                 y_next[0] += 1
             pos[n["id"]] = (depth, y)
-        for n in sorted(forest, key=lambda n: n["created"]):
+        for n in sorted(forest, key=lambda n: latest[n["id"]], reverse=True):
             place(n, 0)
         depth_max = max(d for d, _ in pos.values())
         width = (depth_max + 1) * (W + GX) + 20
