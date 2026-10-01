@@ -922,7 +922,7 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
         nodes = flatten(forest)
         if not nodes:
             return '<p class="muted">nothing yet</p>'
-        W, H, GX, GY = 190, 24, 70, 8
+        W, H, GX, GY = 168, 24, 34, 8
         pos, y_next = {}, [0]
 
         def place(n, depth):
@@ -930,7 +930,7 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
             for c in kids:
                 place(c, depth + 1)
             if kids:
-                y = sum(pos[c["id"]][1] for c in kids) / len(kids)
+                y = pos[kids[0]["id"]][1]      # level with its first child: a line runs straight
             else:
                 y = y_next[0]
                 y_next[0] += 1
@@ -962,14 +962,16 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
             cls = "gn cur" if n["current"] else "gn rank" if n["lane"] == "ranked" else "gn"
             label = f'{star}{n["id"]}{elo}'
             boxes.append(f'<a href="/s/{q(k)}"><g class="{cls}"><rect x="{x}" y="{y}" width="{W}" height="{H}" rx="5"/>'
-                         f'<text x="{x + 7}" y="{y + 16}">{e(label[:30])}</text>'
+                         f'<text x="{x + 7}" y="{y + 16}">{e(label[:26])}</text>'
                          f'<title>{e(n["id"])} ({e(n["lane"])}, {e(n["status"])}) by {e(n["owner"])}\n'
                          f'{e((n["note"] or "")[:300])}</title></g></a>')
-        return f"""<p class="sub">Roots on the left, newest on the right. Edges: <span class="W">green</span> beat its parent,
+        return f"""<p class="sub">Roots on the left, newest on the right (it opens at the newest end; scroll
+left for the history). Each line runs straight across; side branches drop below it. Edges: <span class="W">green</span> beat its parent,
 <span class="L">red</span> lost, <span class="D">yellow</span> tied, dashed = within noise, grey = not measured.
 ★ = each bot's current ranked version; ranked versions have a bold border. Click a box to open it.</p>
-<div class="graphwrap"><svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" class="lgraph">
-{"".join(edges)}{"".join(boxes)}</svg></div>"""
+<div class="graphwrap" id="lgw"><svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" class="lgraph">
+{"".join(edges)}{"".join(boxes)}</svg></div>
+<script>const w = document.getElementById("lgw"); w.scrollLeft = w.scrollWidth;</script>"""
 
     @r.get("/lineage", response_class=HTMLResponse)
     def lineage_page(view: str = "bots", bot: str = "", root: str = "", hide_rejected: bool = True,
