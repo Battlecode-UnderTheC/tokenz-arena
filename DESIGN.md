@@ -106,15 +106,22 @@ POST /api/v1/submissions          Authorization: Bearer <teammate token>
              bot = "swarm"        the bot's name; its submissions form a line
              parent = "<id>"      optional: the submission this builds on (anyone's)
              note = "..."         the hypothesis and what changed (markdown)
-             source = "<url>"     optional: where the code lives, e.g. a GitHub commit or tag URL
+             source = "<url>"     optional: the bot's directory at a commit on GitHub
              lane = "draft"       draft (default) | ranked
 -> 202 {"id": "swarm-7", "status": "checking", "url": "/api/v1/submissions/swarm-7"}
 ```
 
 - **Source link:** optional provenance, shown on the submission's page with the note. The
-  zip is still what's judged and stored, so the arena never fetches the link. Prefer a commit
-  or tag URL (`https://github.com/<org>/<repo>/commit/<sha>`, `/tree/<tag>`). A branch moves,
-  and would stop matching the zip, so a branch URL is flagged on the page as "moving".
+  zip is still what's judged and stored, so the arena never fetches the link.
+  - **Convention:** one directory per bot in a repo, no branch per bot. The link is that
+    directory at the commit the zip came from:
+    `https://github.com/<org>/<repo>/tree/<sha>/bots/<name>`. A commit link never moves, so it
+    always matches the zip.
+  - A link to a branch (`/tree/main/...`) is accepted but flagged "moving" on the page.
+  - A small `arena-submit <dir>` helper (later, in this repo's `scripts/`) zips the
+    directory and fills in `source` itself from `git remote`, `git rev-parse HEAD` and the
+    directory's path. It warns when the directory has uncommitted changes, because the link
+    would then not match the zip.
 - **Names:** a bot belongs to the teammate who first submitted it. Submission ids are
   `<bot>-<n>`.
 - **Lanes:**
@@ -274,7 +281,7 @@ key never leaves poscatgpu2.
 export UNSWBC_SERVER=http://<arena>.<tailnet>.ts.net:8700/unswbc
 unswbc auth set <arena token>
 unswbc submit mybot -n swarm \
-  -d "parent=swarm-6; source=https://github.com/<org>/<repo>/commit/<sha>; lunge at enemy heads"
+  -d "parent=swarm-6; source=https://github.com/<org>/<repo>/tree/<sha>/bots/swarm; lunge at enemy heads"
 ```
 
 The toolkit's upload (fields `name`, `language`, `description`, `zip`) becomes an arena
