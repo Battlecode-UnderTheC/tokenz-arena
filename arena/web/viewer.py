@@ -51,18 +51,70 @@ _THEME = """
 """
 
 
+# One hook patched into the bundle: right after the board's dragons are drawn, call
+# window.__arenaAfterDragons(ctx, views, layout) inside the same transform, so the page can draw
+# overlays (the queen marker) in board pixels. If a new toolkit's bundle doesn't contain the
+# target, the bundle is served unpatched and the overlay just doesn't appear.
+_PATCH_VERSION = "queen-1"
+_PATCH_TARGET = "for(let e of m)Oo(this.#r,e.team).drawDragon(u,e,l);if(u.restore(),"
+_PATCH_HOOK = ("for(let e of m)Oo(this.#r,e.team).drawDragon(u,e,l);"
+               "window.__arenaAfterDragons&&window.__arenaAfterDragons(u,m,l);if(u.restore(),")
+
+
 def extract(dest: Path) -> Path:
-    """Unpacks webview.js and webview.css into dest (once per toolkit version)."""
+    """Unpacks webview.js (patched with the overlay hook) and webview.css into dest, once per
+    toolkit version."""
     dest.mkdir(parents=True, exist_ok=True)
     stamp = dest / ".source"
-    source = f"{VSIX.stat().st_size}:{VSIX.stat().st_mtime_ns}"
+    source = f"{VSIX.stat().st_size}:{VSIX.stat().st_mtime_ns}:{_PATCH_VERSION}"
     if stamp.exists() and stamp.read_text() == source:
         return dest
     with zipfile.ZipFile(VSIX) as z:
-        for name in ("webview.js", "webview.css"):
-            (dest / name).write_bytes(z.read(_PREFIX + name))
+        css = z.read(_PREFIX + "webview.css")
+        js = z.read(_PREFIX + "webview.js").decode("utf-8")
+    if js.count(_PATCH_TARGET) == 1:
+        js = js.replace(_PATCH_TARGET, _PATCH_HOOK)
+    (dest / "webview.css").write_bytes(css)
+    (dest / "webview.js").write_text(js, encoding="utf-8")
     stamp.write_text(source)
     return dest
+
+
+# The queen (dragon id 0 for one team, 1 for the other: the viewer's own rule) gets a gold
+# ring around its head and a crown, toggled with the button (or the Q key) and remembered.
+_QUEEN_OVERLAY = """<script>
+(() => {
+  let on = true;
+  try { on = localStorage.getItem("arena.queens") !== "off"; } catch (e) {}
+  window.__arenaAfterDragons = (ctx, views, layout) => {
+    if (!on) return;
+    const c = layout.cell;
+    for (const v of views) {
+      if (v.id > 1 || v.ghost || !(v.alpha > 0) || !v.head) continue;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, v.alpha);
+      ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = Math.max(1.5, c * 0.14);
+      ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = c * 0.3;
+      ctx.beginPath(); ctx.arc(v.head.x, v.head.y, c * 0.85, 0, Math.PI * 2); ctx.stroke();
+      ctx.font = `${Math.max(9, c * 1.05)}px system-ui, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillStyle = "#ffd23f";
+      ctx.fillText("\u265B", v.head.x, v.head.y - c * 0.8);
+      ctx.restore();
+    }
+  };
+  const btn = document.createElement("button");
+  const paint = () => { btn.textContent = "\u265B queens: " + (on ? "on" : "off"); btn.style.opacity = on ? 1 : .6; };
+  const toggle = () => { on = !on; paint(); try { localStorage.setItem("arena.queens", on ? "on" : "off"); } catch (e) {}
+    window.dispatchEvent(new Event("resize")); };
+  btn.title = "highlight each team's queen (Q)";
+  btn.style.cssText = "position:fixed;right:22px;top:calc(var(--arena-header, 0px) + 22px);z-index:9;padding:4px 10px;border-radius:6px;" +
+    "border:1px solid #ffd23f;background:#1e1e1e;color:#ffd23f;font:12px system-ui;cursor:pointer";
+  btn.onclick = toggle; paint();
+  document.addEventListener("keydown", (e) => { if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey
+    && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "")) toggle(); });
+  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(btn));
+})();
+</script>"""
 
 
 def _js(value) -> str:
@@ -78,6 +130,7 @@ def page(replay_url: str, name: str, assets: str = "/viewer", header: str = "",
     "Team A" / "Team B" with real names (the bundle only knows seats)."""
     if team_names:
         head += _relabel(team_names)
+    head += _QUEEN_OVERLAY
     return _shell(name, assets, "replay",
                   _js({"type": "open", "name": name, "url": replay_url}), header, head)
 

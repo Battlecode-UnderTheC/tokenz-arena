@@ -786,6 +786,7 @@ async function saveNote() {{
 <span class="r">{links} · {back}</span>
 </div>"""
         head = """<style>
+:root { --arena-header: 46px; }
 .gh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding: 6px 14px;
   background: #0d0e10; border-bottom: 1px solid #2b2b2b; font-size: 13px; color: #ddd; }
 .gh a { color: #6ea2ff; text-decoration: none; } .gh a:hover { text-decoration: underline; }

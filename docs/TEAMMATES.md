@@ -27,7 +27,7 @@ The arena is on Tailscale only, and there's no account or password.
 | [Leaderboard]({ARENA}/) | Ranked bots: rating ± error, record, status. Recent submissions with their verdicts. |
 | `/bots/<bot>` | A bot's history: every version, its note, verdict, lineage and head-to-head. |
 | `/s/<id>` | One submission: its note, the verdict against its parent and the top bots, where it loses (by map, by opponent, how its dragons die, CPU), its games, a source download and **Promote**. |
-| `/games/<id>` | Watch a game in the browser, using the toolkit's own replay viewer. |
+| `/games/<id>` | Watch a game in the browser, using the toolkit's own replay viewer, with real team names instead of Team A/B. Each team's **queen** gets a gold ring and crown (toggle with the button or the Q key). |
 | [Lineage]({ARENA}/lineage) | The family tree of all submissions, each with its verdict against its parent. Shows which lines keep improving. |
 | [Ideas]({ARENA}/ideas) | Search everything that's been tried, with outcomes. Check here before starting an idea. |
 | [Maps]({ARENA}/maps) | Per-map stats and map previews. |
