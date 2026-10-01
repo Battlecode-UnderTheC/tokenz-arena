@@ -28,8 +28,30 @@ def _version(sid: str) -> tuple:
     return (int(m.group(1)), m.group(2)) if m else (-1, "")
 
 
-def rename_submissions(cfg: Config, table: Path, dry_run: bool = True) -> dict:
+def rename_submissions(cfg: Config, table: Path, dry_run: bool = True,
+                       remove: list[str] | None = None) -> dict:
+    """`remove`: submissions to delete first (their folders, unpacked bots and games are moved to
+    data_dir/removed/, so it can be undone by hand), e.g. ones whose ids the table needs."""
     arena = Arena(cfg)
+    remove = [r for r in (remove or []) if r]
+    unknown = [r for r in remove if r not in arena.subs]
+    if unknown:
+        raise SystemExit(f"can't remove, not in the arena: {unknown}")
+    removed_games = [g for g in arena.games if g.a in remove or g.b in remove]
+    kids = [s.id for s in arena.subs.values() if s.parent in remove]
+    for sid in remove:
+        dict.pop(arena.subs, sid, None)
+    arena.games = [g for g in arena.games if g not in removed_games]
+    for s in arena.subs.values():
+        if s.parent in remove:
+            s.parent = None
+        if s.opponents:
+            s.opponents = [o for o in s.opponents if o not in remove]
+        if s.quick_opponents:
+            s.quick_opponents = [o for o in s.quick_opponents if o not in remove]
+    for b in arena.bots.values():
+        if b.get("current") in remove:
+            b["current"] = None
     rows = [r for r in csv.DictReader(table.open(), delimiter="\t") if r.get("old_id")]
     ren = {r["old_id"]: r for r in rows}
     missing = [o for o in ren if o not in arena.subs]
@@ -44,7 +66,8 @@ def rename_submissions(cfg: Config, table: Path, dry_run: bool = True) -> dict:
     fix = lambda sid: idmap.get(sid, sid)
 
     old_current = {b.get("current") for b in arena.bots.values() if b.get("current")}
-    report = {"renamed": len(idmap), "games": 0, "retired": [], "lines": {}}
+    report = {"renamed": len(idmap), "games": 0, "retired": [], "lines": {},
+              "removed": {"submissions": remove, "games": len(removed_games), "orphaned_children": kids}}
 
     # submissions: id, bot, agent label, and every reference to another submission
     for s in list(arena.subs.values()):
@@ -92,7 +115,21 @@ def rename_submissions(cfg: Config, table: Path, dry_run: bool = True) -> dict:
         report["dry_run"] = True
         return report
 
-    # write: folders, metas, games, bots, ratings, bridge links, aliases
+    # write: removals first, then folders, metas, games, bots, ratings, bridge links, aliases
+    trash = cfg.data_dir / "removed"
+    for sid in remove:
+        for base, name in ((cfg.submissions, "submissions"), (cfg.bots, "bots")):
+            if (base / sid).exists():
+                (trash / name).mkdir(parents=True, exist_ok=True)
+                (base / sid).rename(trash / name / sid)
+    for g in removed_games:
+        p = cfg.games / f"{g.id}.json"
+        if p.exists():
+            (trash / "games").mkdir(parents=True, exist_ok=True)
+            p.rename(trash / "games" / p.name)
+    for s in arena.subs.values():
+        if s.id not in ren:
+            store.write_json(cfg.submissions / s.id / "meta.json", asdict(s))   # cleared refs
     # two phases, via temporary names: a table may give a freed id to another submission
     for phase in ("tmp", "final"):
         for old, new in idmap.items():

@@ -292,3 +292,19 @@ def test_migrate_reuses_a_freed_id(arena, tmp_path):
     assert b.subs["queen-6"].parent == "queen-1" and b.subs["queen-1"].sha256 == old.sha256
     assert b.resolve("gst-queen-1-1") == "queen-1" and b.resolve("queen-1") == "queen-1"
     assert (arena.cfg.bots / "queen-6").exists() and (arena.cfg.bots / "queen-1").exists()
+
+
+def test_migrate_removes_then_renames(arena, tmp_path):
+    from arena import migrate
+    from arena.state import Arena as A
+    old = add(arena, "gst-queen-1")
+    clash = add(arena, "queen", lane="draft", parent=old.id)          # queen-1, to be removed
+    arena.add_game(Game(id=0, lane="draft", suite="official", map="one", seed=1, a=clash.id,
+                        b=old.id, winner="A", rounds=500))
+    tsv = tmp_path / "r.tsv"
+    tsv.write_text(f"old_id\tnew_bot\tnew_id\tteam\tlane\n{old.id}\tqueen\tqueen-1\tsearch\tranked\n")
+    rep = migrate.rename_submissions(arena.cfg, tsv, dry_run=False, remove=["queen-1"])
+    assert rep["removed"]["games"] == 1
+    b = A(arena.cfg)
+    assert b.subs["queen-1"].sha256 == old.sha256 and not b.games
+    assert (arena.cfg.data_dir / "removed" / "submissions" / "queen-1").exists()
