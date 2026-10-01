@@ -1,0 +1,41 @@
+name: image
+
+# Builds the arena image (engine, website and the self-contained remote judge) and publishes it
+# to ghcr.io/battlecode-underthec/tokenz-arena, as :latest from main and :sha-<commit> always.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # bcweb is a private repo in the org, read with a read-only deploy key; the image
+      # takes it as a build context, never over the network.
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BCWEB_DEPLOY_KEY }}
+      - run: git clone -q --depth 1 git@github.com:Battlecode-UnderTheC/bcweb.git ../bcweb
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-contexts: bcweb=../bcweb
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/battlecode-underthec/tokenz-arena:sha-${{ github.sha }}
+            ${{ github.ref == 'refs/heads/main' && 'ghcr.io/battlecode-underthec/tokenz-arena:latest' || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

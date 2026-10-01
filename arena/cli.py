@@ -70,6 +70,8 @@ def _engine(args: argparse.Namespace) -> int:
         bridge.install(arena, daemon)
     except ModuleNotFoundError:
         pass
+    from arena import workers
+    workers.install(arena, daemon)
     daemon.start()
     uvicorn.run(create_app(arena), host="127.0.0.1",
                 port=args.port or cfg.get("api", "engine_port", 8701), log_level="warning")
@@ -155,6 +157,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host")
     p.add_argument("--port", type=int)
     p.set_defaults(func=_web)
+    p = sub.add_parser("worker", help="a remote judge: lease games from an arena and play them here")
+    p.add_argument("--arena", help="the arena's URL (or ARENA_URL)")
+    p.add_argument("--token", help="a worker token (or ARENA_WORKER_TOKEN)")
+    p.add_argument("--name", help="this worker's name (default: the host name)")
+    p.add_argument("--slots", type=int, help="games at once (default: cores / 1.5)")
+    p.add_argument("--cache", help="bots, maps and work files (default ~/.cache/tokenz-arena-worker, or ARENA_CACHE)")
+    p.add_argument("--idle-exit", type=float, help="exit after this many seconds with nothing to do "
+                                                    "(or ARENA_IDLE_EXIT; for batch jobs)")
+    p.set_defaults(func=lambda a: __import__("arena.worker", fromlist=["main"]).main(a))
     p = sub.add_parser("migrate-renames", help="move submissions into lines from a TSV (engine stopped)")
     p.add_argument("table", help="TSV: old_id new_bot new_id team lane")
     p.add_argument("--config")

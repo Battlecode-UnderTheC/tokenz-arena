@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable
 
 from arena import judge, rating, scheduler, store, submit
-from arena.state import CHECKING, ENGINE, Arena, Game, now
+from arena.state import CHECKING, ENGINE, Arena, Game, current_engine, now
 
 log = logging.getLogger("arena")
 
@@ -31,6 +31,8 @@ class Daemon:
         self.workers = int(cfg.get("play", "workers", 4))
         # workers = 0: a read-only arena (serves and imports, never plays or checks)
         self.pool = ThreadPoolExecutor(max(1, self.workers), thread_name_prefix="judge")
+        self.check_slots = max(1, int(cfg.get("play", "check_slots", 2)))
+        self.checks = ThreadPoolExecutor(self.check_slots, thread_name_prefix="check")
         # Each game (the judge run and parsing its log) happens in a worker process; the
         # threads above only wait on them, so the engine's own process stays responsive.
         self.procs = ProcessPoolExecutor(max(1, self.workers), mp_context=mp.get_context("spawn"))
@@ -41,6 +43,8 @@ class Daemon:
         self.wake = threading.Event()
         arena.ratings = store.read_json(cfg.data_dir / "ratings.json", {}) or {}
         arena.daemon = self
+        self.registry = None                 # arena.workers.Registry once remote workers are enabled
+        self.paused_remote = False
 
     def install_maps(self):
         """Keeps the worldgen suites current: this week's rotating maps and the holdout."""
@@ -69,35 +73,41 @@ class Daemon:
             self.wake.clear()
 
     def busy(self) -> int:
-        return len(self.arena.running) + len(self.checking)
+        """Slots of the engine's own pool in use (games leased to remote workers don't count)."""
+        return sum(1 for r in self.arena.running.values() if r.get("worker", "local") == "local")
 
     def _tick(self):
         a = self.arena
         with a.lock:
             running = [{"priority": r["job"].priority, "a": r["job"].a, "b": r["job"].b,
                         "suite": r["job"].suite, "map": r["job"].map, "seed": r["job"].seed,
-                        "owner": r["job"].owner, "for_sub": r["job"].for_sub, "started": r["started"]}
+                        "owner": r["job"].owner, "for_sub": r["job"].for_sub, "started": r["started"],
+                        "worker": r.get("worker", "local")}
                        for r in a.running.values()]
+        remote = self.registry.snapshot() if self.registry else []
         store.write_json(a.cfg.data_dir / "heartbeat.json",
-                         {"at": now(), "workers": self.workers, "running": running,
+                         {"at": now(), "workers": self.workers + sum(w["slots"] for w in remote),
+                          "local_workers": self.workers, "remote": remote, "running": running,
                           "checking": sorted(self.checking)})
         for period, fn, name in self.tasks:
             if time.time() - self.last_run.get(name, 0) >= period:
                 self.last_run[name] = time.time()
                 threading.Thread(target=self._task, args=(fn, name), daemon=True).start()
-        free = self.workers - self.busy()
+        # Checks have their own slots, so new submissions never wait behind games (and still
+        # run when every game goes to remote workers).
+        check_free = self.check_slots - len(self.checking)
         with a.lock:
             pending = [s for s in a.subs.values() if s.status == CHECKING and s.id not in self.checking]
-        for s in sorted(pending, key=lambda s: s.created)[:max(0, free)]:
+        for s in sorted(pending, key=lambda s: s.created)[:max(0, check_free)]:
             self.checking.add(s.id)
-            self.pool.submit(self._check, s)
-            free -= 1
+            self.checks.submit(self._check, s)
+        free = self.workers - self.busy()
         if free <= 0:
             return
         scheduler.settle(a)
         for job in scheduler.next_jobs(a, free):
             with a.lock:
-                a.running[job.key] = {"job": job, "started": now()}
+                a.running[job.key] = {"job": job, "started": now(), "worker": "local"}
             self.pool.submit(self._play, job)
         scheduler.settle(a)
 
@@ -119,24 +129,40 @@ class Daemon:
             self.wake.set()
 
     def _play(self, job: scheduler.Job):
-        a, cfg = self.arena, self.arena.cfg
-        g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
-                 a=job.a, b=job.b, meta={"engine": ENGINE})
+        cfg = self.arena.cfg
         try:
             res = self.procs.submit(judge.run_game, job.map, str(cfg.bots / job.a),
                                     str(cfg.bots / job.b), job.seed, str(cfg.work / "replays"),
                                     str(cfg.work), cfg.get("play", "game_timeout", 1800)).result()
-            if res.get("error"):
-                g.error = res["error"]
-                replay = None
-            else:
-                g.winner, g.rounds, g.reason = res["winner"], res["rounds"], res["reason"]
-                g.seconds, g.stats = res["seconds"], res["stats"]
-                replay = Path(res["replay"]) if res.get("replay") else None
         except Exception as e:
-            g.error = f"internal: {e}"
-            replay = None
+            res = {"error": f"internal: {e}"}
             log.error("game %s failed:\n%s", job.key, traceback.format_exc())
+        self.record_result(job, res, "local")
+
+    def record_result(self, job: scheduler.Job, res: dict, worker: str,
+                      replay: Path | None = None) -> bool:
+        """Records one finished game, from the engine's own pool or a remote worker. Returns
+        False (and records nothing) if that game was already recorded meanwhile, e.g. when an
+        expired lease's game was played again elsewhere and both results arrive."""
+        a, cfg = self.arena, self.arena.cfg
+        with a.lock:
+            done = any((g.a, g.b, g.suite, g.map, g.seed) == job.key and current_engine(g)
+                       for g in reversed(a.games[-5000:]))
+            r = a.running.get(job.key)
+            if r and r.get("worker", "local") == worker:
+                a.running.pop(job.key, None)
+        if done:
+            log.info("game %s from %s: already recorded, dropped", job.key, worker)
+            return False
+        g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
+                 a=job.a, b=job.b, meta={"engine": ENGINE, "worker": worker})
+        if res.get("error"):
+            g.error = res["error"]
+        else:
+            g.winner, g.rounds, g.reason = res["winner"], res["rounds"], res["reason"]
+            g.seconds, g.stats = res.get("seconds"), res.get("stats") or {}
+            if replay is None and res.get("replay"):
+                replay = Path(res["replay"])
         a.add_game(g)
         if replay and replay.exists():
             cfg.replays.mkdir(parents=True, exist_ok=True)
@@ -144,12 +170,12 @@ class Daemon:
             shutil.move(str(replay), dest)
             g.replay = dest.name
             a.save_game(g)
-        with a.lock:
-            a.running.pop(job.key, None)
-        log.info("game %d %s vs %s on %s: %s", g.id, g.a, g.b, g.map, g.error or g.winner or "draw")
+        log.info("game %d %s vs %s on %s (%s): %s", g.id, g.a, g.b, g.map, worker,
+                 g.error or g.winner or "draw")
         self.rate()
         scheduler.settle(a)
         self.wake.set()
+        return True
 
     def rate(self):
         r = rating.fit(self.arena)
