@@ -112,7 +112,8 @@ def test_mcp_tools_over_streamable_http(arena):
                     assert json.loads(r.content[0].text)[0]["outcome"] == "pending"
                     r = await c.call_tool("submission", {"id": "nope-1"})
                     assert r.is_error and "no submission" in r.content[0].text
+                    # The bridge is installed but has no key in tests: status says so, no error.
                     r = await c.call_tool("server_status", {})
-                    assert r.is_error and "server bridge not available" in r.content[0].text
+                    assert not r.is_error, r.content[0].text
 
     asyncio.run(run())

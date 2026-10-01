@@ -5,3 +5,4 @@ __pycache__/
 arena.toml
 *.replay
 .env
+!tests/data/*.replay

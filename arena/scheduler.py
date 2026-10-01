@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from arena import store
 from arena.state import DONE, PLACING, PLAYING, QUEUED, RATED, REJECTED, EXTERNAL, Arena
 
 DRAFT, PLACEMENT, HOLDOUT, CONTINUOUS = 0, 1, 2, 3
@@ -49,6 +50,22 @@ def ranking(arena: Arena) -> list[str]:
                                                      s.created))]
 
 
+_SEEDS: dict = {"mtime": None, "seeds": {}}
+
+
+def server_seeds(arena: Arena) -> dict[str, list[int]]:
+    """{map stem: seeds seen on the competition server}, written by the server bridge
+    (data_dir/server/seeds.json); re-read only when the file changes."""
+    p = arena.cfg.data_dir / "server" / "seeds.json"
+    try:
+        mtime = p.stat().st_mtime
+    except FileNotFoundError:
+        return {}
+    if _SEEDS["mtime"] != (p, mtime):
+        _SEEDS.update(mtime=(p, mtime), seeds=store.read_json(p, {}) or {})
+    return _SEEDS["seeds"]
+
+
 def _usable(arena: Arena, sid: str | None) -> bool:
     s = arena.subs.get(sid or "")
     return bool(s) and s.status not in (REJECTED, EXTERNAL) and (arena.cfg.bots / s.id).exists()
@@ -81,9 +98,13 @@ def owed_for(arena: Arena, s) -> list[Job]:
             _freeze(arena, s, ([s.parent] if s.parent else []) + [c.id for c in arena.current()])
         # The server suite (maps and seeds seen on the competition server) joins placement,
         # so a bot that only wins on our maps shows it before it goes live.
-        return (_pairings(arena, s.id, s.opponents or [], "official", seed, PLACEMENT, s.owner)
-                + _pairings(arena, s.id, s.opponents or [], "server",
-                            arena.cfg.seeds("server")[:1], PLACEMENT, s.owner))
+        jobs = _pairings(arena, s.id, s.opponents or [], "official", seed, PLACEMENT, s.owner)
+        per_map = arena.cfg.get("server", "suite_seeds", 2)
+        for m in maps(arena, "server"):
+            seeds = server_seeds(arena).get(m.stem, [])[:per_map] or arena.cfg.seeds("server")[:1]
+            jobs += [j for j in _pairings(arena, s.id, s.opponents or [], "server", seeds,
+                                          PLACEMENT, s.owner) if Path(j.map).stem == m.stem]
+        return jobs
     return []
 
 

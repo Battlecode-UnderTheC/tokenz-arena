@@ -89,3 +89,16 @@ def test_identity_from_tailscale_headers():
         assert (c.owner, c.agent) == ("alice@github", "worker-3")
     finally:
         who.TRUST_HEADERS = False
+
+
+def test_placement_plays_server_maps_on_their_own_seeds(arena):
+    from arena import store
+    server = arena.cfg.data_dir / "maps" / "server"
+    server.mkdir(parents=True)
+    (server / "dilemma.map").write_text("MAP 4 4\n")
+    store.write_json(arena.cfg.data_dir / "server" / "seeds.json", {"dilemma": [11, 22, 33]})
+    p = add(arena, "base")
+    q = add(arena, "other")
+    jobs = [j for j in scheduler.owed_for(arena, q) if j.suite == "server"]
+    assert sorted({j.seed for j in jobs}) == [11, 22]          # suite_seeds defaults to 2
+    assert len(jobs) == 2 * 2                                  # 2 seeds x 2 seats vs base
