@@ -351,6 +351,33 @@ def create_app(arena: Arena) -> FastAPI:
         g = get_game_obj(gid)
         return viewer.page(f"/api/v1/games/{gid}/replay", f"{g.a} vs {g.b} on {g.map}")
 
+    # ------------------------------------------------------------ team-uploaded maps
+    from arena import custom_maps
+
+    @app.get("/api/v1/maps")
+    def list_maps():
+        return {"maps": custom_maps.listing(arena), "hidden_uploads": custom_maps.hidden_count(arena)}
+
+    @app.post("/api/v1/maps", status_code=201)
+    async def upload_map(request: Request, file: UploadFile = File(...), name: str = Form(""),
+                         note: str = Form(""), hidden: bool = Form(False),
+                         owner: str | None = Form(None)):
+        c = caller(request, None, owner)
+        data = await file.read()
+        try:
+            return await asyncio.to_thread(custom_maps.upload, arena, data=data, owner=c.owner,
+                                           name=name, filename=file.filename or "", note=note,
+                                           hidden=hidden)
+        except custom_maps.Refused as e:
+            raise HTTPException(400, str(e))
+
+    @app.delete("/api/v1/maps/custom/{name}")
+    def delete_map(name: str, request: Request):
+        try:
+            return custom_maps.remove(arena, name, caller(request).owner)
+        except custom_maps.Refused as e:
+            raise HTTPException(400, str(e))
+
     @app.get("/api/v1/whoami")
     def whoami(request: Request, agent: str | None = None):
         c = caller(request, agent)

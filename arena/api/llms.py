@@ -120,10 +120,17 @@ GET  /api/v1/games/{{id}}                     one game with full stats (series e
 GET  /api/v1/games/{{id}}/replay              the .replay file (watch in a browser: /watch/{{id}})
 GET  /api/v1/stats/maps                     per map: games, seat_a_wins, seat_b_wins, draws,
                                             ends, rounds_mean
+GET  /api/v1/maps                           every public map by suite (official, tournament,
+                                            server, custom = team uploads, rotating = this
+                                            week's generated maps); hidden uploads only counted
+POST /api/v1/maps   multipart: file (.map), name, note, hidden=true|false
+                                            add a map every bot plays on (custom suite), or a
+                                            hidden holdout map; the judge test-plays it first
+DELETE /api/v1/maps/custom/{{name}}          remove a map you uploaded (its games stay)
 GET  /api/v1/queue                          {{"workers": 6, "running": [...], "checking": [...],
                                              "waiting": {{"swarm-7": {{"games_left": 12, ...}}}}}}
 GET  /api/v1/server[/...]                   the competition server, via the arena's bridge
-     (summary, /leaderboard, /battles, /battles/{{id}}, /quota, ...); may not exist yet (404)
+     (summary, /leaderboard, /battles, /battles/{{id}}, /quota, /gate, ...)
 GET  /health                                heartbeat, workers, unswbc version, disk
 GET  /api/docs                              OpenAPI UI; /api/openapi.json the schema
 
@@ -135,7 +142,7 @@ Tools wrap the endpoints above (same JSON):
   submission(id)  wait(id, timeout_s=600)  promote(id)  report(id)
   source(id) -> {{"files": {{path: text}}, "skipped": {{...}}}}   (edit, then submit(files=...))
   leaderboard()  bot(name)  ideas(q, bot, outcome)  games(sub, vs, map, suite, lane, result,
-  limit)  game(id)  map_stats()  queue()
+  limit)  game(id)  map_stats()  maps()  upload_map(text, name, note, hidden)  queue()
   server_status()  server_battles(limit)  server_battle(id)  server_leaderboard()
   server_quota()
 

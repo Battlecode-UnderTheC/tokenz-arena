@@ -38,8 +38,10 @@ class Job:
 
 
 def maps(arena: Arena, suite: str) -> list[Path]:
-    d = arena.cfg.map_dir(suite)
-    return sorted(d.glob("*.map")) if d and d.is_dir() else []
+    dirs = [arena.cfg.map_dir(suite)]
+    if suite == "holdout":                      # generated + hidden team uploads
+        dirs.append(arena.cfg.map_dir("holdout_custom"))
+    return sorted(p for d in dirs if d and d.is_dir() for p in d.glob("*.map"))
 
 
 def ranking(arena: Arena) -> list[str]:
@@ -84,9 +86,9 @@ def _pairings(arena: Arena, sub: str, opponents: list[str], suite: str, seeds: l
     return out
 
 
-DRAFT_SUITES = ["official", "tournament", "server"]
-PLACEMENT_SUITES = ["official", "tournament", "server", "rotating"]
-CONTINUOUS_SUITES = ["official", "tournament", "rotating"]
+DRAFT_SUITES = ["official", "tournament", "server", "custom"]
+PLACEMENT_SUITES = ["official", "tournament", "server", "custom", "rotating"]
+CONTINUOUS_SUITES = ["official", "tournament", "custom", "rotating"]
 
 
 def suite_seeds(arena: Arena, suite: str, m: Path) -> list[int]:

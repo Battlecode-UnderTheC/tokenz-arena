@@ -16,6 +16,7 @@ Common commands:
     tokenz leaderboard
     tokenz ideas lunge                   # what has been tried, with outcomes
     tokenz get swarm-7 ./swarm-7         # download a submission's source to build on
+    tokenz map-upload chokepoints.map --note "narrow corridors"   # a map every bot plays on
 
 Every command takes --json for machine-readable output (for agents). The arena's address
 comes from --arena, then $TOKENZ_ARENA, then ~/.config/tokenz/config.json {"arena": ...},
@@ -98,7 +99,8 @@ def get(args, path: str, **params):
                    timeout=params.get("wait", 0) + 60 if "wait" in params else 60)
 
 
-def multipart(fields: dict, filename: str, blob: bytes) -> tuple[bytes, str]:
+def multipart(fields: dict, filename: str, blob: bytes,
+              file_type: str = "application/zip") -> tuple[bytes, str]:
     edge = f"tokenz{uuid.uuid4().hex}"
     out = bytearray()
     for k, v in fields.items():
@@ -106,7 +108,7 @@ def multipart(fields: dict, filename: str, blob: bytes) -> tuple[bytes, str]:
             continue
         out += f'--{edge}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
     out += (f'--{edge}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-            "Content-Type: application/zip\r\n\r\n").encode() + blob + b"\r\n"
+            f"Content-Type: {file_type}\r\n\r\n").encode() + blob + b"\r\n"
     out += f"--{edge}--\r\n".encode()
     return bytes(out), f"multipart/form-data; boundary={edge}"
 
@@ -403,6 +405,33 @@ def cmd_server(args):
         emit(args, get(args, "/api/v1/server"))
 
 
+def cmd_maps(args):
+    def human(d):
+        table([[m["suite"], m["name"], m.get("owner", ""), "x".join(m.get("size") or []),
+                (m.get("note") or "")[:50]] for m in d["maps"]], ["suite", "map", "owner", "size", "note"])
+        print(f"({d['hidden_uploads']} hidden uploads in the holdout, not listed)")
+    emit(args, get(args, "/api/v1/maps"), human)
+
+
+def cmd_map_upload(args):
+    p = Path(args.file)
+    body, ctype = multipart({"name": args.name or p.stem, "note": args.note,
+                             "hidden": "true" if args.hidden else None, "owner": args.owner},
+                            p.name, p.read_bytes(), "text/plain")
+    if not args.json:
+        print("the judge is playing a test game on it ...", file=sys.stderr)
+    d = request(args, "POST", "/api/v1/maps", body, ctype, timeout=700)
+    emit(args, d, lambda m: print(
+        f"added {m['name']} to the {m['suite']} suite ({'x'.join(m.get('size') or [])}); "
+        f"test game: {m['check']}" + ("" if m["suite"] == "holdout" else
+                                      f"\n  {arena_url(args)}/maps/custom/{m['name']}")))
+
+
+def cmd_map_remove(args):
+    emit(args, request(args, "DELETE", f"/api/v1/maps/custom/{urllib.parse.quote(args.name)}"),
+         lambda m: print(f"removed {m['name']} (its games stay)"))
+
+
 def cmd_mcp(args):
     url = arena_url(args) + "/mcp"
     print(f"MCP endpoint: {url} (streamable HTTP)\n")
@@ -501,6 +530,19 @@ def main(argv=None) -> int:
                    choices=["status", "battles", "leaderboard", "quota", "gate"])
     s.add_argument("--limit", type=int, default=10)
     s.set_defaults(f=cmd_server)
+    s = sp.add_parser("maps", help="every public map by suite, team uploads included")
+    s.set_defaults(f=cmd_maps)
+    s = sp.add_parser("map-upload", help="add a map every bot in the arena plays on")
+    s.add_argument("file", help="a .map file (first line: MAP <width> <height>)")
+    s.add_argument("--name", help="default: the file name")
+    s.add_argument("--note", help="what it tests")
+    s.add_argument("--hidden", action="store_true",
+                   help="put it in the holdout: only the top 4 play it, nobody sees it")
+    s.add_argument("--owner", help="your name, only for shared machines without a Tailscale login")
+    s.set_defaults(f=cmd_map_upload)
+    s = sp.add_parser("map-remove", help="remove a map you uploaded (its games stay)")
+    s.add_argument("name")
+    s.set_defaults(f=cmd_map_remove)
     s = sp.add_parser("mcp", help="how to add the arena's MCP server to your agent")
     s.set_defaults(f=cmd_mcp)
     s = sp.add_parser("update", help="replace this file with the arena's latest tokenz.py")

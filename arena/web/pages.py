@@ -554,7 +554,7 @@ document.getElementById("promote").onclick = async (ev) => {{
 <label>submission<input name="sub" value="{e(sub)}" list="subs" placeholder="any"></label>
 <label>vs<input name="vs" value="{e(vs)}" list="subs" placeholder="any"></label>
 <label>map<select name="map">{opt(maps_, map)}</select></label>
-<label>suite<select name="suite">{opt(["official", "tournament", "server", "rotating", "check"], suite)}</select></label>
+<label>suite<select name="suite">{opt(["official", "tournament", "server", "custom", "rotating", "check"], suite)}</select></label>
 <label>lane<select name="lane">{opt(["draft", "placement", "continuous", "check", "server"], lane)}</select></label>
 <label>result (for submission)<select name="result">{opt(["W", "D", "L"], result)}</select></label>
 <label>limit<input name="limit" value="{limit}" size="4"></label>
@@ -612,7 +612,7 @@ watched; its verdict and stats are below.</p>
 
     # ------------------------------------------------------------ maps
     @r.get("/maps", response_class=HTMLResponse)
-    def maps_page():
+    def maps_page(request: Request):
         rows = []
         for m in http.map_stats(arena):
             n = m["games"]
@@ -627,7 +627,7 @@ watched; its verdict and stats are below.</p>
                          f'<a href="/games?map={q(m["map"])}&suite={q(m["suite"])}">games</a>'])
         played = {(m["suite"], m["map"]) for m in http.map_stats(arena)}
         unplayed = []
-        for suite in ("official", "tournament", "server", "rotating"):
+        for suite in ("official", "tournament", "server", "custom", "rotating"):
             d = arena.cfg.map_dir(suite)
             for p in sorted(d.glob("*.map")) if d and d.is_dir() else []:
                 if (suite, p.stem) not in played:
@@ -637,8 +637,61 @@ watched; its verdict and stats are below.</p>
 games: the first-seat advantage.</p>
 {table(["suite", "map", "games", "A wins", "B wins", "draws", "A wins %", "rounds mean", "how games end", "", ""],
        rows, numeric={2, 3, 4, 5, 6, 7}, empty="no games yet")}
-{f'<h2>Not played yet</h2><p>{" · ".join(unplayed)}</p>' if unplayed else ''}"""
-        return layout("Maps", body, "/api/v1/stats/maps", "/maps")
+{f'<h2>Not played yet</h2><p>{" · ".join(unplayed)}</p>' if unplayed else ''}
+{uploads_html(request)}"""
+        return layout("Maps", body, ["/api/v1/stats/maps", "/api/v1/maps"], "/maps")
+
+    def uploads_html(request: Request) -> str:
+        from arena import custom_maps
+        me = http.caller(request).owner
+        mine_or_local = lambda o: o == me or me == "local"
+        rows = []
+        for m in sorted(custom_maps.meta(arena).values(), key=lambda x: x["created"], reverse=True):
+            if m["suite"] != "custom":
+                continue
+            rm = (f'<button class="small" onclick="rmMap({json.dumps(m["name"])})">remove</button>'
+                  if mine_or_local(m["owner"]) else "")
+            rows.append([f'<a href="/maps/custom/{q(m["name"])}">{e(m["name"])}</a>', e(m["owner"]),
+                         e("x".join(m.get("size") or [])), when(m["created"]),
+                         f'<td class="note">{e(m.get("note") or "")}</td>',
+                         f'<a href="/games?suite=custom&map={q(m["name"])}">games</a>', rm])
+        hidden = custom_maps.hidden_count(arena)
+        return f"""<h2>Team maps <span class="sub">uploaded maps every bot plays on</span></h2>
+{table(["map", "owner", "size", "uploaded", "note", "", ""], rows, empty="none uploaded yet")}
+<p class="muted">{hidden} hidden map(s) uploaded to the holdout (not listed).</p>
+<h2>Upload a map</h2>
+<p class="sub">A <code>.map</code> file in the unswbc format (make one with the toolkit's map
+editor, or <code>worldgen.py</code>). The official judge plays a test game on it first. Public
+maps join drafts, placement and continuous games for every bot. <b>Hidden</b> maps go to the
+holdout instead: only the top 4 play them, and nobody can see them or their games, so nobody can
+tune to them. Uploading as <b>{e(me)}</b>.</p>
+<form id="mapform" class="stack" onsubmit="return upMap(event)">
+<label>file</label><span><input type="file" name="file" accept=".map,text/plain" required></span>
+<label>name</label><span><input name="name" placeholder="from the file name if empty"></span>
+<label>note</label><span><input name="note" placeholder="what it tests: chokepoints, open field, ..."></span>
+<label>hidden</label><span><input type="checkbox" name="hidden" value="true"> holdout (not listed)</span>
+<span></span><span><button type="submit">Upload</button> <span id="mapmsg" class="muted"></span></span>
+</form>
+<script>
+async function upMap(ev) {{
+  ev.preventDefault();
+  const f = new FormData(document.getElementById("mapform"));
+  if (!f.get("hidden")) f.delete("hidden");
+  const msg = document.getElementById("mapmsg");
+  msg.textContent = "checking with the judge...";
+  const r = await fetch("/api/v1/maps", {{method: "POST", body: f}});
+  const d = await r.json();
+  if (!r.ok) {{ msg.textContent = d.detail || ("HTTP " + r.status); return false; }}
+  msg.textContent = "added " + d.name + " (" + d.suite + "); " + d.check;
+  setTimeout(() => location.reload(), 1200);
+  return false;
+}}
+async function rmMap(name) {{
+  if (!confirm("Remove " + name + "? Its games stay.")) return;
+  const r = await fetch("/api/v1/maps/custom/" + encodeURIComponent(name), {{method: "DELETE"}});
+  if (r.ok) location.reload(); else alert((await r.json()).detail);
+}}
+</script>"""
 
     @r.get("/maps/{suite}/{name}", response_class=HTMLResponse)
     def map_preview(suite: str, name: str):

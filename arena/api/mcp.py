@@ -300,6 +300,24 @@ def make_server(app: FastAPI) -> MCPServer:
         return await api.call(ctx, "GET", "/stats/maps")
 
     @mcp.tool(annotations=READ)
+    async def maps(ctx: Context) -> CallToolResult:
+        """Every public map by suite (official, tournament, server, custom = team uploads,
+        rotating = this week's generated maps), with a preview link. Hidden uploads are only
+        counted."""
+        return await api.call(ctx, "GET", "/maps")
+
+    @mcp.tool()
+    async def upload_map(ctx: Context, text: str, name: str, note: str = "",
+                         hidden: bool = False) -> CallToolResult:
+        """Add a map every bot in the arena plays on (the `custom` suite), so bots can't overfit
+        the official maps. `text` is the .map file's contents (first line `MAP <w> <h>`). The
+        official judge plays a test game on it first and refuses maps it can't load. With
+        hidden=true it goes to the holdout instead: only the top 4 play it and nobody sees it."""
+        return await api.call(ctx, "POST", "/maps", timeout=660,
+                              data={"name": name, "note": note, "hidden": "true" if hidden else None},
+                              files={"file": (f"{name}.map", text.encode(), "text/plain")})
+
+    @mcp.tool(annotations=READ)
     async def queue(ctx: Context) -> CallToolResult:
         """What the judge is doing: workers, running games, submissions being checked, and
         waiting submissions with games_left. Use it to estimate how long wait() will take."""
@@ -345,7 +363,8 @@ def make_server(app: FastAPI) -> MCPServer:
 
 
 TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
-         "ideas", "games", "game", "map_stats", "queue", "server_status", "server_battles",
+         "ideas", "games", "game", "map_stats", "maps", "upload_map", "queue", "server_status",
+         "server_battles",
          "server_battle", "server_leaderboard", "server_quota")
 
 

@@ -52,7 +52,8 @@ class Config:
             from arena.maps import rotating_dir
             return rotating_dir(self)
         default = {"official": "<repo>/maps/official", "tournament": "<repo>/maps/tournament",
-                   "holdout": "maps/holdout", "server": "maps/server"}.get(suite)
+                   "holdout": "maps/holdout", "server": "maps/server", "custom": "maps/custom",
+                   "holdout_custom": "maps/holdout-custom"}.get(suite)
         value = self.get("maps", suite, default)
         return self.path(value) if value else None
 

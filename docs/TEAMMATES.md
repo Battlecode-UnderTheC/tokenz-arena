@@ -92,6 +92,7 @@ numbers stay in Ideas, so nobody repeats the experiment blind.
 | `tokenz mine` · `tokenz whoami` | Your submissions; who the arena thinks you are. |
 | `tokenz queue` | What's playing and waiting. |
 | `tokenz server [battles\|leaderboard\|quota\|gate]` | The competition server. |
+| `tokenz maps` · `tokenz map-upload FILE [--hidden]` · `tokenz map-remove NAME` | List maps; add a map every bot plays on; remove yours. |
 | `tokenz mcp` | How to add the arena's MCP server to your agent. |
 
 Every command takes `--json` for scripts and agents, and `--agent LABEL` to say which of
@@ -127,11 +128,12 @@ workers fairly, so one person's 30 agents don't starve everyone else.
   | official | the 15 official maps |
   | tournament | competition tournament maps (the 7 Sprint maps so far) |
   | server | the maps the competition server plays now, with the seeds it actually used |
+  | custom | **maps the team uploads**, played by every bot |
   | rotating | 20 procedurally generated maps (worldgen), a new set every week |
   | holdout | 60 generated maps from a secret seed range, never shown |
 
-- **Draft:** plays its **parent** and the current **top 3** on the official, tournament and
-  server maps, in both seats. Unranked. It usually takes a few minutes.
+- **Draft:** plays its **parent** and the current **top 3** on the official, tournament,
+  server and custom maps, in both seats. Unranked. It usually takes a few minutes.
 - **Ranked** (promoted or submitted with `--lane ranked`): plays its parent and every other
   bot's current version on all of those plus this week's rotating maps. It becomes its bot's
   current version, and the previous one retires.
@@ -145,7 +147,28 @@ workers fairly, so one person's 30 agents don't starve everyone else.
   read environment variables, and it must build and play one game. A bot that fails is
   `rejected` with the reason and the judge's log.
 
-## 6. The competition server
+## 6. Team maps
+
+The next tournament may use maps nobody has seen. Upload your own maps so no bot can overfit
+the official ones:
+
+```sh
+tokenz map-upload chokepoints.map --note "narrow corridors, few beds"
+tokenz map-upload secret.map --hidden        # goes to the holdout: nobody can see or tune to it
+tokenz maps                                  # everything public, by suite
+```
+
+Or use the form on the [Maps]({ARENA}/maps) page, or the MCP tool `upload_map`. Make maps with
+the toolkit's map editor, or `worldgen.py`. The official judge plays a test game on every
+upload and refuses maps it can't load.
+
+- A **public** upload joins the `custom` suite. Every current bot plays it against its
+  opponents right away, and every later draft and placement includes it.
+- A **hidden** upload joins the holdout. Only the top 4 play it, and its name and games are
+  never shown.
+- You can remove your own maps (`tokenz map-remove NAME`). Their games stay in the record.
+
+## 7. The competition server
 
 - **Auto-submit:** when the arena's #1 is clearly better than our live bot, the arena
   uploads it to the server and activates it. That means a rating clearly above the live
@@ -158,7 +181,7 @@ workers fairly, so one person's 30 agents don't starve everyone else.
 - **Challenges:** `POST /api/v1/server/battles` (or the Server page) starts one. It checks
   the team's 60-games-an-hour quota first, and it logs who asked.
 
-## 7. Rules and limits
+## 8. Rules and limits
 
 - Bots must **not read environment variables** (`os.environ`, `getenv`). The competition
   forbids it and the arena rejects it.
@@ -170,7 +193,7 @@ workers fairly, so one person's 30 agents don't starve everyone else.
 - Always name a `--parent` when you build on something, and write a real note: the
   hypothesis and the change. That's what makes Ideas useful.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | What to do |
 |---|---|
