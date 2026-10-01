@@ -72,29 +72,68 @@ Non-goals:
 
 ## Worker
 
-On a machine already on the tailnet (with the repo, or the image):
+One image, one command. `<image>` is `ghcr.io/battlecode-underthec/tokenz-arena:latest`, built by
+CI from `main` (`.github/workflows/image.yml`). The package is private, so pull it with a GitHub
+token that has `read:packages` (`docker login ghcr.io`).
+
+| Variable | |
+|---|---|
+| `ARENA_WORKER_TOKEN` | Required: a token from the arena's `[workers] tokens`. |
+| `TS_AUTHKEY` | A Tailscale auth key (reusable, ephemeral, tagged `tag:arena-worker`). The worker joins the tailnet itself in userspace mode: no root, no `/dev/net/tun`, no `--privileged`. Leave it out on a machine that already reaches the arena. |
+| `ARENA_URL` | Default `https://tokenz-arena.lonk-kelvin.ts.net`. |
+| `WORKER_NAME` | Default: the Batch job id, else the host name. |
+| `ARENA_SLOTS` | Games at once. Default: cores ÷ 1.5. |
+| `ARENA_IDLE_EXIT` | Exit after this many idle seconds. Use it for batch jobs, so they end when the queue is empty. |
+
+**Any machine with Docker:**
+
+```sh
+docker run -d --restart unless-stopped --name arena-worker \
+  -e ARENA_WORKER_TOKEN=... -e TS_AUTHKEY=tskey-auth-... \
+  -v arena-worker-cache:/home/arena/.cache \
+  ghcr.io/battlecode-underthec/tokenz-arena:latest worker
+```
+
+The volume keeps the judge's prepared toolchain and compiled bots across restarts.
+
+**AWS Batch** (any instance type; Fargate works too). A job definition:
+
+```json
+{
+  "jobDefinitionName": "tokenz-arena-worker",
+  "type": "container",
+  "containerProperties": {
+    "image": "ghcr.io/battlecode-underthec/tokenz-arena:latest",
+    "command": ["worker"],
+    "resourceRequirements": [{"type": "VCPU", "value": "16"}, {"type": "MEMORY", "value": "16384"}],
+    "environment": [{"name": "ARENA_IDLE_EXIT", "value": "600"}, {"name": "ARENA_SLOTS", "value": "12"}],
+    "secrets": [{"name": "ARENA_WORKER_TOKEN", "valueFrom": "arn:aws:secretsmanager:...:arena-worker-token"},
+                {"name": "TS_AUTHKEY", "valueFrom": "arn:aws:secretsmanager:...:tailscale-worker-key"}],
+    "repositoryCredentials": {"credentialsParameter": "arn:aws:secretsmanager:...:ghcr-pull"}
+  }
+}
+```
+
+Submit N copies (an array job) when the queue is long. Each copy drains games and exits after
+`ARENA_IDLE_EXIT` seconds with nothing to do. A fresh container prepares the judge's toolchain on
+its first game (a minute or two), so jobs are best long-lived.
+
+**Kubernetes:** a Deployment, or a Job with `parallelism: N`. The container is the image with args
+`["worker"]` and the same variables, with the token and key from a Secret. No special security
+context is needed.
+
+**Without Docker,** on a machine on the tailnet with the repo checked out:
 
 ```sh
 uv run arena worker --arena https://tokenz-arena.<tailnet>.ts.net --token ... --slots 16
 ```
 
-Anywhere else, with Docker (`deploy/worker-compose.yaml`: the worker plus a userspace Tailscale
-sidecar, so no root and no host install):
-
-```sh
-TS_AUTHKEY=tskey-auth-... ARENA_WORKER_TOKEN=... WORKER_NAME=lab-3 \
-  docker compose -f deploy/worker-compose.yaml up -d
-```
-
-- **Network.** The sidecar joins the tailnet in userspace mode with an ephemeral key, so it needs
-  no root and disappears from the tailnet when it stops. The worker reaches the arena through the
-  sidecar's local HTTP proxy.
 - **Cache.** Bots by source sha256 (zip, unpacked, and the judge's compiled wasm, which is keyed
   by folder name and content, so a C++ bot compiles once per machine). Maps by sha256.
 - **Slots.** `--slots` defaults to the core count divided by 1.5, since a game uses one to three
   cores at peak.
-- **Leaving.** `SIGTERM` stops leasing, finishes or abandons the running games (an abandoned lease
-  just expires), and exits.
+- **Leaving.** `SIGTERM` stops leasing, finishes the running games (up to 10 minutes; an abandoned
+  lease just expires and the game is played again), and exits.
 
 ## Turning it on
 

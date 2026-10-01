@@ -162,7 +162,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--token", help="a worker token (or ARENA_WORKER_TOKEN)")
     p.add_argument("--name", help="this worker's name (default: the host name)")
     p.add_argument("--slots", type=int, help="games at once (default: cores / 1.5)")
-    p.add_argument("--cache", default="~/.cache/tokenz-arena-worker", help="bots, maps and work files")
+    p.add_argument("--cache", help="bots, maps and work files (default ~/.cache/tokenz-arena-worker, or ARENA_CACHE)")
+    p.add_argument("--idle-exit", type=float, help="exit after this many seconds with nothing to do "
+                                                    "(or ARENA_IDLE_EXIT; for batch jobs)")
     p.set_defaults(func=lambda a: __import__("arena.worker", fromlist=["main"]).main(a))
     p = sub.add_parser("migrate-renames", help="move submissions into lines from a TSV (engine stopped)")
     p.add_argument("table", help="TSV: old_id new_bot new_id team lane")

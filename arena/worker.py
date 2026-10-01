@@ -29,10 +29,12 @@ from arena import judge
 from arena.state import ENGINE
 
 log = logging.getLogger("arena.worker")
+DEFAULT_ARENA = "https://tokenz-arena.lonk-kelvin.ts.net"
 
 
 class Worker:
-    def __init__(self, arena: str, token: str, name: str, slots: int, cache: Path):
+    def __init__(self, arena: str, token: str, name: str, slots: int, cache: Path,
+                 idle_exit: float = 0):
         self.arena, self.token, self.name, self.slots = arena.rstrip("/"), token, name, slots
         self.cache = cache
         self.active: dict[str, dict] = {}          # lease -> game
@@ -41,6 +43,8 @@ class Worker:
         self.heartbeat_seconds = 30
         self.procs = ProcessPoolExecutor(max(1, slots), mp_context=mp.get_context("spawn"))
         self.fetch_lock = threading.Lock()
+        self.idle_exit = idle_exit                 # exit after this long with nothing to do (0: never)
+        self.last_work = time.monotonic()
 
     # ------------------------------------------------------------------ http
     def _req(self, method: str, path: str, body: bytes | None = None, ctype: str | None = None,
@@ -165,6 +169,12 @@ class Worker:
                     self.active[l["lease"]] = l["game"]
                 threading.Thread(target=self.play, args=(l["lease"], l["game"]), daemon=True).start()
             idle = 0 if leases else min(idle + 1, 6)
+            if leases:
+                self.last_work = time.monotonic()
+            elif self.idle_exit and not self.active and time.monotonic() - self.last_work > self.idle_exit:
+                log.info("idle for %ds: exiting", self.idle_exit)
+                self.stopping.set()
+                break
             time.sleep(1 if leases else 5 * idle)
         log.info("stopping: waiting for %d running games", len(self.active))
         deadline = time.time() + 600
@@ -174,13 +184,15 @@ class Worker:
 
 def main(args) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    token = args.token or os.environ.get("ARENA_WORKER_TOKEN")
-    arena = args.arena or os.environ.get("ARENA_URL")
-    if not token or not arena:
-        raise SystemExit("needs --arena (or ARENA_URL) and --token (or ARENA_WORKER_TOKEN)")
-    slots = args.slots or max(1, int((os.cpu_count() or 2) / 1.5))
-    w = Worker(arena, token, args.name or socket.gethostname(), slots,
-               Path(args.cache).expanduser())
+    env = os.environ.get
+    token = args.token or env("ARENA_WORKER_TOKEN")
+    arena = args.arena or env("ARENA_URL") or DEFAULT_ARENA
+    if not token:
+        raise SystemExit("needs a worker token: --token or ARENA_WORKER_TOKEN")
+    slots = args.slots or int(env("ARENA_SLOTS") or 0) or max(1, int((os.cpu_count() or 2) / 1.5))
+    idle = args.idle_exit if args.idle_exit is not None else float(env("ARENA_IDLE_EXIT") or 0)
+    w = Worker(arena, token, args.name or env("WORKER_NAME") or socket.gethostname(), slots,
+               Path(args.cache or env("ARENA_CACHE") or "~/.cache/tokenz-arena-worker").expanduser(), idle)
     signal.signal(signal.SIGTERM, lambda *_: w.stopping.set())
     signal.signal(signal.SIGINT, lambda *_: w.stopping.set())
     w.run()
