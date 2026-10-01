@@ -281,7 +281,8 @@ def queue(arena: Arena) -> dict:
     with arena.lock:
         running = [{"a": r["job"].a, "b": r["job"].b, "map": r["job"].map.rsplit("/", 1)[-1][:-4],
                     "seed": r["job"].seed, "lane": r["job"].lane, "owner": r["job"].owner,
-                    "started": r["started"]} for r in arena.running.values()]
+                    "started": r["started"], "worker": r.get("worker", "local")}
+                   for r in arena.running.values()]
         checking = [s.id for s in arena.subs.values() if s.status == "checking"]
     waiting: dict[str, dict] = {}
     for s in list(arena.subs.values()):
@@ -587,7 +588,7 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
                            f'DEFAULT_ARENA = "{url}"', 1)
 
     for mod, attr in (("arena.web.pages", "router"), ("arena.web.docs", "router"),
-                      ("arena.server.routes", "router")):
+                      ("arena.server.routes", "router"), ("arena.api.workers", "router")):
         try:
             m = __import__(mod, fromlist=[attr])
             app.include_router(m.make_router(arena) if hasattr(m, "make_router") else getattr(m, attr))

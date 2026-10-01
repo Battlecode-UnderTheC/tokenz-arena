@@ -1,0 +1,187 @@
+"""`arena worker`: a remote judge (docs/WORKERS.md). Leases games from an arena, runs them with
+the official judge on this machine, and returns the results with their replays.
+
+    arena worker --arena https://tokenz-arena.<tailnet>.ts.net --token ... --slots 16
+
+Bots and maps are cached by content hash under --cache, so each is downloaded once per
+machine; the bot folder keeps its submission id as its name, so the judge's wasm build cache
+compiles each C/C++ bot once per machine too.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import multiprocessing as mp
+import os
+import signal
+import socket
+import threading
+import time
+import urllib.error
+import urllib.request
+import uuid
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+from arena import judge
+from arena.state import ENGINE
+
+log = logging.getLogger("arena.worker")
+
+
+class Worker:
+    def __init__(self, arena: str, token: str, name: str, slots: int, cache: Path):
+        self.arena, self.token, self.name, self.slots = arena.rstrip("/"), token, name, slots
+        self.cache = cache
+        self.active: dict[str, dict] = {}          # lease -> game
+        self.lock = threading.Lock()
+        self.stopping = threading.Event()
+        self.heartbeat_seconds = 30
+        self.procs = ProcessPoolExecutor(max(1, slots), mp_context=mp.get_context("spawn"))
+        self.fetch_lock = threading.Lock()
+
+    # ------------------------------------------------------------------ http
+    def _req(self, method: str, path: str, body: bytes | None = None, ctype: str | None = None,
+             timeout: float = 120) -> bytes:
+        req = urllib.request.Request(self.arena + path, data=body, method=method)
+        req.add_header("Authorization", f"Bearer {self.token}")
+        req.add_header("User-Agent", f"arena-worker/{ENGINE}")
+        if ctype:
+            req.add_header("Content-Type", ctype)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+
+    def _json(self, path: str, payload: dict) -> dict:
+        return json.loads(self._req("POST", path, json.dumps(payload).encode(), "application/json"))
+
+    def _hello(self) -> dict:
+        return {"worker": self.name, "version": ENGINE, "slots": self.slots}
+
+    # ------------------------------------------------------------------ cache
+    def _fetch(self, path: str, dest: Path, sha: str) -> Path:
+        with self.fetch_lock:
+            if dest.exists():
+                return dest
+            data = self._req("GET", path, timeout=300)
+            got = hashlib.sha256(data).hexdigest()
+            if got != sha:
+                raise RuntimeError(f"{path}: sha256 {got[:12]} doesn't match the lease's {sha[:12]}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_name(dest.name + f".{uuid.uuid4().hex}")
+            tmp.write_bytes(data)
+            tmp.rename(dest)
+            return dest
+
+    def bot(self, b: dict) -> Path:
+        from arena.submit import _unpack
+        root = self.cache / "bots" / b["sha256"][:24] / b["id"]
+        if (root / "bot.toml").exists():
+            return root
+        z = self._fetch(f"/api/v1/workers/bot/{b['id']}", self.cache / "zips" / f"{b['sha256']}.zip", b["sha256"])
+        with self.fetch_lock:
+            if not (root / "bot.toml").exists():
+                _unpack(z.read_bytes(), root)
+        return root
+
+    def map(self, suite: str, m: dict) -> Path:
+        return self._fetch(f"/api/v1/workers/map/{suite}/{m['name']}",
+                           self.cache / "maps" / m["sha256"][:24] / f"{m['name']}.map", m["sha256"])
+
+    # ------------------------------------------------------------------ games
+    def play(self, lease: str, game: dict):
+        replay = None
+        try:
+            a, b = self.bot(game["a"]), self.bot(game["b"])
+            m = self.map(game["suite"], game["map"])
+            work = self.cache / "work"
+            work.mkdir(parents=True, exist_ok=True)
+            res = self.procs.submit(judge.run_game, str(m), str(a), str(b), int(game["seed"]),
+                                    str(work / "replays"), str(work), float(game.get("timeout", 1800))).result()
+            replay = Path(res.pop("replay")) if res.get("replay") else None
+        except Exception as e:
+            log.exception("lease %s failed", lease)
+            res = {"error": f"worker {self.name}: {type(e).__name__}: {e}"[:2000]}
+        try:
+            self._send_result(lease, res, replay)
+        except Exception:
+            log.exception("couldn't return lease %s (it will expire and be played again)", lease)
+        finally:
+            if replay and replay.exists():
+                replay.unlink()
+            with self.lock:
+                self.active.pop(lease, None)
+
+    def _send_result(self, lease: str, res: dict, replay: Path | None):
+        edge = uuid.uuid4().hex
+        meta = json.dumps({**res, "lease": lease, "worker": self.name}).encode()
+        body = (f'--{edge}\r\nContent-Disposition: form-data; name="meta"\r\n\r\n'.encode() + meta + b"\r\n")
+        if replay and replay.exists():
+            body += (f'--{edge}\r\nContent-Disposition: form-data; name="replay"; filename="game.replay"\r\n'
+                     "Content-Type: application/octet-stream\r\n\r\n").encode() + replay.read_bytes() + b"\r\n"
+        body += f"--{edge}--\r\n".encode()
+        out = json.loads(self._req("POST", "/api/v1/workers/result", body,
+                                   f"multipart/form-data; boundary={edge}", timeout=300))
+        log.info("lease %s: %s", lease, "recorded" if out.get("recorded") else out.get("why"))
+
+    # ------------------------------------------------------------------ loops
+    def _heartbeats(self):
+        while not self.stopping.wait(self.heartbeat_seconds):
+            with self.lock:
+                leases = list(self.active)
+            try:
+                self._json("/api/v1/workers/heartbeat", {**self._hello(), "leases": leases})
+            except Exception as e:
+                log.warning("heartbeat failed: %s", e)
+
+    def run(self):
+        threading.Thread(target=self._heartbeats, daemon=True).start()
+        log.info("worker %s: %d slots, judge unswbc %s, arena %s", self.name, self.slots, ENGINE, self.arena)
+        idle = 0
+        while not self.stopping.is_set():
+            with self.lock:
+                free = self.slots - len(self.active)
+            if free <= 0:
+                time.sleep(1)
+                continue
+            try:
+                out = self._json("/api/v1/workers/lease", {**self._hello(), "want": free})
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode(errors="replace")[:300]
+                log.error("lease refused: HTTP %s %s", e.code, detail)
+                if e.code in (401, 409):
+                    raise SystemExit(f"worker refused: {detail}")
+                time.sleep(15)
+                continue
+            except Exception as e:
+                log.warning("can't reach the arena: %s", e)
+                time.sleep(15)
+                continue
+            self.heartbeat_seconds = out.get("heartbeat_seconds", 30)
+            leases = out.get("leases") or []
+            for l in leases:
+                with self.lock:
+                    self.active[l["lease"]] = l["game"]
+                threading.Thread(target=self.play, args=(l["lease"], l["game"]), daemon=True).start()
+            idle = 0 if leases else min(idle + 1, 6)
+            time.sleep(1 if leases else 5 * idle)
+        log.info("stopping: waiting for %d running games", len(self.active))
+        deadline = time.time() + 600
+        while self.active and time.time() < deadline:
+            time.sleep(2)
+
+
+def main(args) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    token = args.token or os.environ.get("ARENA_WORKER_TOKEN")
+    arena = args.arena or os.environ.get("ARENA_URL")
+    if not token or not arena:
+        raise SystemExit("needs --arena (or ARENA_URL) and --token (or ARENA_WORKER_TOKEN)")
+    slots = args.slots or max(1, int((os.cpu_count() or 2) / 1.5))
+    w = Worker(arena, token, args.name or socket.gethostname(), slots,
+               Path(args.cache).expanduser())
+    signal.signal(signal.SIGTERM, lambda *_: w.stopping.set())
+    signal.signal(signal.SIGINT, lambda *_: w.stopping.set())
+    w.run()
+    return 0

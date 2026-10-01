@@ -190,7 +190,7 @@ class Arena:
                 continue
             j = Job(r.get("priority", prio.get(r.get("lane"), 3)), r["a"], r["b"], r["suite"],
                     r["map"], r["seed"], r.get("owner", ""), r.get("for_sub", r["a"]))
-            running[j.key] = {"job": j, "started": r.get("started")}
+            running[j.key] = {"job": j, "started": r.get("started"), "worker": r.get("worker", "local")}
         with self.lock:
             if aliases is not None:
                 self.subs.aliases = aliases

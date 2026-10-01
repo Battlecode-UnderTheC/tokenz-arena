@@ -1,0 +1,32 @@
+# A remote judge for tokenz-arena (docs/WORKERS.md), on any machine with Docker:
+#   TS_AUTHKEY=tskey-auth-... ARENA_WORKER_TOKEN=... docker compose -f worker-compose.yaml up -d
+# The Tailscale sidecar joins the tailnet in userspace mode (no root, ephemeral if the key is),
+# and the worker reaches the arena through it.
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${WORKER_NAME:-arena-worker}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?a Tailscale auth key (ephemeral, tag:arena-worker)}
+      TS_USERSPACE: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_OUTBOUND_HTTP_PROXY_LISTEN: 127.0.0.1:1055
+    restart: unless-stopped
+
+  worker:
+    image: ${ARENA_IMAGE:-tokenz-arena:latest}
+    command: ["arena", "worker", "--name", "${WORKER_NAME:-arena-worker}"]
+    network_mode: service:tailscale
+    depends_on: [tailscale]
+    environment:
+      ARENA_URL: ${ARENA_URL:-https://tokenz-arena.lonk-kelvin.ts.net}
+      ARENA_WORKER_TOKEN: ${ARENA_WORKER_TOKEN:?a worker token from the arena's [workers] tokens}
+      HTTPS_PROXY: http://127.0.0.1:1055     # userspace Tailscale: tailnet traffic goes via its proxy
+      HTTP_PROXY: http://127.0.0.1:1055
+    volumes:
+      - worker-cache:/home/arena/.cache
+    restart: unless-stopped
+    stop_grace_period: 10m
+
+volumes:
+  worker-cache:

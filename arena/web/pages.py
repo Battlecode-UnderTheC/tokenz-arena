@@ -831,7 +831,7 @@ async function saveNote() {{
         header = f"""<div class="gh">
 <a class="home" href="/">tokenz-arena</a>
 <span>#{g.id}</span><span>{context}</span><span>{seats}</span><span>{verdict}</span>
-<span class="m">{e((g.meta or {}).get("map_name") or g.map)} · seed {e(g.seed)} · {when(g.played)}</span>
+<span class="m">{e((g.meta or {}).get("map_name") or g.map)} · seed {e(g.seed)} · {when(g.played)}{f' · played on {e(g.meta["worker"])}' if (g.meta or {}).get("worker") not in (None, "local") else ""}</span>
 <span class="r">{links} · {back}</span>
 </div>"""
         head = """<style>
@@ -1353,17 +1353,29 @@ f.onsubmit = async (ev) => {{
     def queue_page():
         qd = http.queue(arena)
         run = [[sub_link(arena, x["a"]), sub_link(arena, x["b"]), e(x["map"]), e(x["seed"]),
-                e(x["lane"]), e(x["owner"]), when(x["started"])] for x in qd["running"]]
+                e(x["lane"]), e(x["owner"]), e(x.get("worker", "local")), when(x["started"])]
+               for x in qd["running"]]
         wait = [[sub_link(arena, sid), e(w["owner"]), e(w["lane"]), str(w["games_left"]),
                  str(w["games_total"]),
                  score_bar(100 * (1 - w["games_left"] / w["games_total"])) if w["games_total"] else ""]
                 for sid, w in sorted(qd["waiting"].items())]
         chk = " · ".join(sub_link(arena, x) for x in qd["checking"])
+        hb = getattr(arena, "heartbeat", None) or {}
+        reg = getattr(arena, "workers", None)
+        remote = reg.snapshot() if reg is not None else hb.get("remote") or []
+        local_slots = hb.get("local_workers", getattr(getattr(arena, "daemon", None), "workers", 0))
+        local_running = sum(1 for x in qd["running"] if x.get("worker", "local") == "local")
+        wrows = [["this machine (engine)", "", str(local_slots), str(local_running), "", ""]] + [
+            [e(w["name"]), e(w["host"]), str(w["slots"]), str(w["running"]), str(w["games_last_hour"]),
+             f'{w["last_seen_s"]}s ago'] for w in remote]
         body = f"""<h1>Queue</h1>
+<h2>Judges <span class="sub">{local_slots + sum(w["slots"] for w in remote)} slots ·
+remote workers join with <code>arena worker</code> (docs/WORKERS.md)</span></h2>
+{table(["worker", "host", "slots", "playing", "games last hour", "last seen"], wrows, numeric={2, 3, 4})}
 <p class="sub">{qd["workers"]} judge workers · {len(qd["running"])} games playing ·
 {len(qd["waiting"])} submissions waiting · priority: drafts, placement, holdout, continuous.</p>
 <h2>Playing now</h2>
-{table(["seat A", "seat B", "map", "seed", "lane", "owner", "started"], run, numeric={3}, empty="nothing playing")}
+{table(["seat A", "seat B", "map", "seed", "lane", "owner", "on", "started"], run, numeric={3}, empty="nothing playing")}
 <h2>Checking</h2><p>{chk or '<span class="muted">nothing</span>'}</p>
 <h2>Waiting</h2>
 {table(["submission", "owner", "lane", "games left", "of", "done"], wait, numeric={3, 4}, empty="nothing waiting")}
