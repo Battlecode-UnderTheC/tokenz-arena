@@ -70,6 +70,119 @@ def leaderboard(arena: Arena) -> list[dict]:
     return rows
 
 
+def bot_detail(arena: Arena, bot: str) -> dict | None:
+    """GET /api/v1/bots/{bot}: a bot's line, lineage and head-to-head (None if no such bot)."""
+    b = arena.bots.get(bot)
+    if not b:
+        return None
+    subs = sorted((s for s in arena.subs.values() if s.bot == bot), key=lambda s: s.created)
+    cur = b.get("current")
+    h2h = []
+    if cur:
+        games = [g for g in arena.games_of(cur) if g.a != g.b and g.suite in ("official", "rotating")]
+        opps = {g.b if g.a == cur else g.a for g in games}
+        for o in sorted(opps):
+            r = wdl([g for g in games if o in (g.a, g.b)], cur)
+            h2h.append({"opponent": o, **r})
+    return {"bot": bot, **b, "submissions": [sub_json(arena, s) for s in subs],
+            "lineage": [{"id": s.id, "parent": s.parent} for s in subs], "head_to_head": h2h}
+
+
+def ideas(arena: Arena, q: str = "", bot: str | None = None, outcome: str | None = None,
+          limit: int = 50) -> list[dict]:
+    """GET /api/v1/ideas: notes paired with their outcomes, newest first."""
+    terms = [t.lower() for t in q.split()]
+    out = []
+    for s in sorted(arena.subs.values(), key=lambda s: s.created, reverse=True):
+        if s.status == "external" or (bot and s.bot != bot):
+            continue
+        text = f"{s.note} {s.bot} {s.id}".lower()
+        if terms and not all(t in text for t in terms):
+            continue
+        v = report.verdict(arena, s.id) if s.status not in ("checking", "rejected") else {}
+        beats = (v.get("vs_parent") or {}).get("beats_parent")
+        promoted = s.lane == "ranked"
+        o = ("rejected" if s.status == REJECTED else "pending" if not v.get("complete")
+             else "no_parent" if not s.parent else "beat_parent" if beats
+             else "lost_to_parent" if beats is False else "tied_parent")
+        if outcome and outcome not in (o, "promoted" if promoted else "-"):
+            continue
+        out.append({"id": s.id, "bot": s.bot, "owner": s.owner, "agent": s.agent,
+                    "parent": s.parent, "note": s.note, "source": s.source,
+                    "created": s.created, "status": s.status, "promoted": promoted,
+                    "outcome": o, "reason": s.reason, "verdict": v})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def find_games(arena: Arena, sub: str | None = None, vs: str | None = None,
+               map: str | None = None, suite: str | None = None, lane: str | None = None,
+               result: str | None = None, limit: int = 50) -> list:
+    """GET /api/v1/games: matching Game objects, newest first."""
+    out = []
+    for g in reversed(arena.games):
+        if sub and sub not in (g.a, g.b):
+            continue
+        if vs and vs not in (g.a, g.b):
+            continue
+        if (map and g.map != map) or (suite and g.suite != suite) or (lane and g.lane != lane):
+            continue
+        if result and sub and (result_for(g, sub) or "E") != result.upper()[:1]:
+            continue
+        out.append(g)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def find_game(arena: Arena, gid: int):
+    for g in reversed(arena.games):
+        if g.id == gid:
+            return g
+    return None
+
+
+def map_stats(arena: Arena) -> list[dict]:
+    """GET /api/v1/stats/maps: per map, games, how they end, first-seat advantage."""
+    rows: dict[str, dict] = {}
+    for g in arena.games:
+        if g.error or g.suite in ("check", "holdout"):
+            continue
+        r = rows.setdefault(f"{g.suite}/{g.map}", {"map": g.map, "suite": g.suite, "games": 0,
+                                                   "seat_a_wins": 0, "seat_b_wins": 0, "draws": 0,
+                                                   "ends": {}, "rounds": 0})
+        r["games"] += 1
+        r["rounds"] += g.rounds or 0
+        key = {"A": "seat_a_wins", "B": "seat_b_wins"}.get(g.winner or "", "draws")
+        r[key] += 1
+        end = (g.reason or "?").split(",")[0]
+        r["ends"][end] = r["ends"].get(end, 0) + 1
+    for r in rows.values():
+        r["rounds_mean"] = round(r.pop("rounds") / r["games"], 1)
+    return sorted(rows.values(), key=lambda r: (r["suite"], r["map"]))
+
+
+def queue(arena: Arena) -> dict:
+    """GET /api/v1/queue: what's playing and what's waiting."""
+    with arena.lock:
+        running = [{"a": r["job"].a, "b": r["job"].b, "map": r["job"].map.rsplit("/", 1)[-1][:-4],
+                    "seed": r["job"].seed, "lane": r["job"].lane, "owner": r["job"].owner,
+                    "started": r["started"]} for r in arena.running.values()]
+        checking = [s.id for s in arena.subs.values() if s.status == "checking"]
+    waiting: dict[str, dict] = {}
+    for s in list(arena.subs.values()):
+        if s.status in ("queued", "playing", "placing"):
+            owed = scheduler.owed_for(arena, s)
+            taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games_of(s.id)}
+            left = sum(1 for j in owed if j.key not in taken)
+            if left:
+                waiting[s.id] = {"owner": s.owner, "lane": s.lane, "games_left": left,
+                                 "games_total": len(owed)}
+    return {"workers": getattr(getattr(arena, "daemon", None), "workers", 0),
+            "running": running, "checking": checking, "waiting": waiting}
+
+
 def create_app(arena: Arena) -> FastAPI:
     app = FastAPI(title="tokenz-arena", version="0.1", docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
@@ -162,73 +275,28 @@ def create_app(arena: Arena) -> FastAPI:
 
     @api.get("/bots/{bot}")
     def get_bot(bot: str):
-        b = arena.bots.get(bot)
-        if not b:
+        d = bot_detail(arena, bot)
+        if d is None:
             raise HTTPException(404, f"no bot {bot!r}")
-        subs = sorted((s for s in arena.subs.values() if s.bot == bot), key=lambda s: s.created)
-        cur = b.get("current")
-        h2h = []
-        if cur:
-            games = [g for g in arena.games_of(cur) if g.a != g.b and g.suite in ("official", "rotating")]
-            opps = {g.b if g.a == cur else g.a for g in games}
-            for o in sorted(opps):
-                r = wdl([g for g in games if o in (g.a, g.b)], cur)
-                h2h.append({"opponent": o, **r})
-        return {"bot": bot, **b, "submissions": [sub_json(arena, s) for s in subs],
-                "lineage": [{"id": s.id, "parent": s.parent} for s in subs], "head_to_head": h2h}
+        return d
 
     @api.get("/ideas")
     def get_ideas(q: str = "", bot: str | None = None, outcome: str | None = None,
                   limit: int = 50):
-        terms = [t.lower() for t in q.split()]
-        out = []
-        for s in sorted(arena.subs.values(), key=lambda s: s.created, reverse=True):
-            if s.status == "external" or (bot and s.bot != bot):
-                continue
-            text = f"{s.note} {s.bot} {s.id}".lower()
-            if terms and not all(t in text for t in terms):
-                continue
-            v = report.verdict(arena, s.id) if s.status not in ("checking", "rejected") else {}
-            beats = (v.get("vs_parent") or {}).get("beats_parent")
-            promoted = s.lane == "ranked"
-            o = ("rejected" if s.status == REJECTED else "pending" if not v.get("complete")
-                 else "no_parent" if not s.parent else "beat_parent" if beats
-                 else "lost_to_parent" if beats is False else "tied_parent")
-            if outcome and outcome not in (o, "promoted" if promoted else "-"):
-                continue
-            out.append({"id": s.id, "bot": s.bot, "owner": s.owner, "agent": s.agent,
-                        "parent": s.parent, "note": s.note, "source": s.source,
-                        "created": s.created, "status": s.status, "promoted": promoted,
-                        "outcome": o, "reason": s.reason, "verdict": v})
-            if len(out) >= limit:
-                break
-        return out
+        return ideas(arena, q, bot, outcome, limit)
 
     # ------------------------------------------------------------ games
     @api.get("/games")
     def get_games(sub: str | None = None, vs: str | None = None, map: str | None = None,
                   suite: str | None = None, lane: str | None = None, result: str | None = None,
                   limit: int = Query(50, le=1000)):
-        out = []
-        for g in reversed(arena.games):
-            if sub and sub not in (g.a, g.b):
-                continue
-            if vs and vs not in (g.a, g.b):
-                continue
-            if (map and g.map != map) or (suite and g.suite != suite) or (lane and g.lane != lane):
-                continue
-            if result and sub and (result_for(g, sub) or "E") != result.upper()[:1]:
-                continue
-            out.append(game_json(g))
-            if len(out) >= limit:
-                break
-        return out
+        return [game_json(g) for g in find_games(arena, sub, vs, map, suite, lane, result, limit)]
 
     def get_game_obj(gid: int):
-        for g in reversed(arena.games):
-            if g.id == gid:
-                return g
-        raise HTTPException(404, f"no game {gid}")
+        g = find_game(arena, gid)
+        if g is None:
+            raise HTTPException(404, f"no game {gid}")
+        return g
 
     @api.get("/games/{gid}")
     def get_game(gid: int):
@@ -244,42 +312,12 @@ def create_app(arena: Arena) -> FastAPI:
                             filename=f"{g.a}-vs-{g.b}-on-{g.map}-{g.id}.replay")
 
     @api.get("/stats/maps")
-    def map_stats():
-        rows: dict[str, dict] = {}
-        for g in arena.games:
-            if g.error or g.suite in ("check", "holdout"):
-                continue
-            r = rows.setdefault(f"{g.suite}/{g.map}", {"map": g.map, "suite": g.suite, "games": 0,
-                                                       "seat_a_wins": 0, "seat_b_wins": 0, "draws": 0,
-                                                       "ends": {}, "rounds": 0})
-            r["games"] += 1
-            r["rounds"] += g.rounds or 0
-            key = {"A": "seat_a_wins", "B": "seat_b_wins"}.get(g.winner or "", "draws")
-            r[key] += 1
-            end = (g.reason or "?").split(",")[0]
-            r["ends"][end] = r["ends"].get(end, 0) + 1
-        for r in rows.values():
-            r["rounds_mean"] = round(r.pop("rounds") / r["games"], 1)
-        return sorted(rows.values(), key=lambda r: (r["suite"], r["map"]))
+    def get_map_stats():
+        return map_stats(arena)
 
     @api.get("/queue")
-    def queue():
-        with arena.lock:
-            running = [{"a": r["job"].a, "b": r["job"].b, "map": r["job"].map.rsplit("/", 1)[-1][:-4],
-                        "seed": r["job"].seed, "lane": r["job"].lane, "owner": r["job"].owner,
-                        "started": r["started"]} for r in arena.running.values()]
-            checking = [s.id for s in arena.subs.values() if s.status == "checking"]
-        waiting: dict[str, dict] = {}
-        for s in list(arena.subs.values()):
-            if s.status in ("queued", "playing", "placing"):
-                owed = scheduler.owed_for(arena, s)
-                taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games_of(s.id)}
-                left = sum(1 for j in owed if j.key not in taken)
-                if left:
-                    waiting[s.id] = {"owner": s.owner, "lane": s.lane, "games_left": left,
-                                     "games_total": len(owed)}
-        return {"workers": getattr(getattr(arena, "daemon", None), "workers", 0),
-                "running": running, "checking": checking, "waiting": waiting}
+    def get_queue():
+        return queue(arena)
 
     app.include_router(api)
 
