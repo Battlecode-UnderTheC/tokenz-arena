@@ -119,7 +119,8 @@ class _Api:
 
     async def call(self, ctx: Context | None, method: str, path: str, *, params: dict | None = None,
                    data: dict | None = None, files: dict | None = None, timeout: float = 60,
-                   raw: bool = False, out: bool = True, not_found: str | None = None) -> Any:
+                   raw: bool = False, out: bool = True, not_found: str | None = None,
+                   json_body: dict | None = None) -> Any:
         headers: dict[str, str] = {}
         client = ("127.0.0.1", 0)
         req = None
@@ -141,7 +142,7 @@ class _Api:
                 method, f"/api/v1{path}", headers=headers,
                 params={k: v for k, v in (params or {}).items() if v is not None and v != ""},
                 data={k: v for k, v in data.items() if v is not None} if data else None,
-                files=files)
+                files=files, json=json_body)
         if r.status_code >= 400:
             try:
                 detail = r.json().get("detail", r.text)
@@ -299,6 +300,20 @@ def make_server(app: FastAPI) -> MCPServer:
         """Per map: games, seat_a_wins, seat_b_wins, draws, how games end, rounds_mean."""
         return await api.call(ctx, "GET", "/stats/maps")
 
+    @mcp.tool()
+    async def edit_note(ctx: Context, id: str, note: str) -> CallToolResult:
+        """Replace a submission's note (only its owner can). Use it to record what the verdict
+        showed, or correct the hypothesis; earlier versions are kept in note_history."""
+        return await api.call(ctx, "PATCH", f"/submissions/{id}", json_body={"note": note})
+
+    @mcp.tool(annotations=READ)
+    async def lineage(ctx: Context, bot: str | None = None, root: str | None = None) -> CallToolResult:
+        """The family forest: each submission under its parent (across bots), with its verdict
+        against its parent, status, rating and whether it's its bot's current version. Use it to
+        find the lines that keep improving, before choosing what to build on."""
+        return await api.call(ctx, "GET", "/lineage", params={"bot": bot, "root": root,
+                                                              "hide_rejected": "true"})
+
     @mcp.tool(annotations=READ)
     async def maps(ctx: Context) -> CallToolResult:
         """Every public map by suite (official, tournament, server, custom = team uploads,
@@ -363,7 +378,8 @@ def make_server(app: FastAPI) -> MCPServer:
 
 
 TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
-         "ideas", "games", "game", "map_stats", "maps", "upload_map", "queue", "server_status",
+         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "lineage",
+         "queue", "server_status",
          "server_battles",
          "server_battle", "server_leaderboard", "server_quota")
 

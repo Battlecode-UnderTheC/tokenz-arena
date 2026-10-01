@@ -127,6 +127,10 @@ POST /api/v1/maps   multipart: file (.map), name, note, hidden=true|false
                                             add a map every bot plays on (custom suite), or a
                                             hidden holdout map; the judge test-plays it first
 DELETE /api/v1/maps/custom/{{name}}          remove a map you uploaded (its games stay)
+PATCH  /api/v1/submissions/{{id}}  JSON {{"note": "..."}}   edit a note (owner only; history kept)
+GET  /api/v1/lineage?bot=&root=             the family forest: nodes {{id, bot, lane, status,
+                                            vs_parent {{W, D, L, beats_parent, significant}},
+                                            elo, current, children: [...]}}
 GET  /api/v1/queue                          {{"workers": 6, "running": [...], "checking": [...],
                                              "waiting": {{"swarm-7": {{"games_left": 12, ...}}}}}}
 GET  /api/v1/server[/...]                   the competition server, via the arena's bridge
@@ -143,6 +147,7 @@ Tools wrap the endpoints above (same JSON):
   source(id) -> {{"files": {{path: text}}, "skipped": {{...}}}}   (edit, then submit(files=...))
   leaderboard()  bot(name)  ideas(q, bot, outcome)  games(sub, vs, map, suite, lane, result,
   limit)  game(id)  map_stats()  maps()  upload_map(text, name, note, hidden)  queue()
+  edit_note(id, note)  lineage(bot, root)
   server_status()  server_battles(limit)  server_battle(id)  server_leaderboard()
   server_quota()
 

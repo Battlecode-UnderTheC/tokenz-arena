@@ -142,6 +142,57 @@ def find_games(arena: Arena, sub: str | None = None, vs: str | None = None,
     return out
 
 
+def lineage(arena: Arena, root: str | None = None, bot: str | None = None,
+            hide_rejected: bool = False) -> list[dict]:
+    """GET /api/v1/lineage: the family forest of submissions (parent links, across bots).
+    Each node has its verdict against its parent, rating and children. `root` gives that
+    submission's subtree; `bot` the trees that contain one of its submissions."""
+    with arena.lock:
+        subs = {k: s for k, s in arena.subs.items() if s.status != "external"
+                and not (hide_rejected and s.status == REJECTED)}
+    kids: dict[str | None, list] = {}
+    for s in subs.values():
+        kids.setdefault(s.parent if s.parent in subs else None, []).append(s)
+    ratings = getattr(arena, "ratings", {}) or {}
+    current = {b.get("current") for b in arena.bots.values()}
+
+    def node(s) -> dict:
+        v = report.verdict(arena, s.id) if s.status not in ("checking", "rejected") else {}
+        vp = v.get("vs_parent") or {}
+        return {"id": s.id, "bot": s.bot, "owner": s.owner, "agent": s.agent, "lane": s.lane,
+                "status": s.status, "created": s.created, "current": s.id in current,
+                "note": s.note, "elo": (ratings.get(s.id) or {}).get("elo"),
+                "vs_parent": {k: vp.get(k) for k in ("W", "D", "L", "score", "beats_parent",
+                                                     "significant")} if vp else None,
+                "children": [node(c) for c in sorted(kids.get(s.id, []), key=lambda c: c.created)]}
+
+    def contains_bot(n) -> bool:
+        return n["bot"] == bot or any(contains_bot(c) for c in n["children"])
+
+    if root:
+        return [node(subs[root])] if root in subs else []
+    forest = [node(s) for s in sorted(kids.get(None, []), key=lambda s: s.created)]
+    return [n for n in forest if contains_bot(n)] if bot else forest
+
+
+def edit_note(arena: Arena, sid: str, note: str, by: str) -> object:
+    """Replaces a submission's note (the owner's, or a local admin's); the old one is kept."""
+    s = arena.subs.get(sid)
+    if not s or s.status == "external":
+        raise HTTPException(404, f"no submission {sid!r}")
+    if by not in (s.owner, "local"):
+        raise HTTPException(403, f"only {s.owner} can edit the note of {sid}")
+    if len(note) > 20000:
+        raise HTTPException(400, "note is longer than 20000 characters")
+    with arena.lock:
+        if note != s.note:
+            s.note_history.append({"at": __import__("arena.state", fromlist=["now"]).now(),
+                                   "by": by, "note": s.note})
+            s.note = note
+            arena.save_sub(s)
+    return s
+
+
 def find_game(arena: Arena, gid: int):
     """A game by id; holdout games are hidden (None), so their maps and replays never leak."""
     for g in reversed(arena.games):
@@ -246,6 +297,21 @@ def create_app(arena: Arena) -> FastAPI:
         while wait and s.status not in FINAL and asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(2)
         return sub_json(arena, s, detail=True)
+
+    @api.patch("/submissions/{sid}")
+    async def patch_submission(sid: str, request: Request):
+        """Edit a submission's note: JSON {"note": "..."}. Only its owner; history is kept."""
+        try:
+            body = await request.json()
+        except ValueError:
+            raise HTTPException(400, 'send JSON: {"note": "..."}')
+        if not isinstance(body, dict) or not isinstance(body.get("note"), str):
+            raise HTTPException(400, 'send JSON: {"note": "..."}')
+        return sub_json(arena, edit_note(arena, sid, body["note"], caller(request).owner), detail=True)
+
+    @api.get("/lineage")
+    def get_lineage(root: str | None = None, bot: str | None = None, hide_rejected: bool = False):
+        return lineage(arena, root, bot, hide_rejected)
 
     @api.post("/submissions/{sid}/promote")
     def promote(sid: str, request: Request):

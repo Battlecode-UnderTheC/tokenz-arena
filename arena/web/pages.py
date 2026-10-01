@@ -22,7 +22,7 @@ from arena.api import http
 from arena.state import Arena, result_for
 from arena.web import viewer
 
-NAV = [("/", "Leaderboard"), ("/ideas", "Ideas"), ("/games", "Games"), ("/maps", "Maps"),
+NAV = [("/", "Leaderboard"), ("/lineage", "Lineage"), ("/ideas", "Ideas"), ("/games", "Games"), ("/maps", "Maps"),
        ("/queue", "Queue"), ("/server", "Server"), ("/submit", "Submit"), ("/docs", "Docs")]
 
 
@@ -132,6 +132,12 @@ button { background: var(--accent); color: #fff; border-color: var(--accent); cu
   padding: 5px 12px; }
 button:disabled { opacity: .5; cursor: default; }
 button.small { padding: 1px 8px; font-size: 12px; vertical-align: 2px; }
+ul.tree { list-style: none; margin: 0; padding-left: 22px; border-left: 1px dashed var(--line); }
+ul.tree.root { padding-left: 0; border-left: none; }
+ul.tree li { margin: 3px 0; }
+ul.tree summary { cursor: pointer; list-style-position: outside; }
+.node .tnote { color: var(--muted); font-size: 12px; margin: 1px 0 0 2px; white-space: normal; }
+.node.hl { background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 4px; padding: 1px 4px; }
 form.stack { display: grid; grid-template-columns: max-content minmax(0, 560px); gap: 8px 12px;
   align-items: center; }
 form.stack label { color: var(--muted); }
@@ -214,6 +220,15 @@ def side_label(arena: Arena, sid: str | None) -> str:
     if sid.startswith("server-version:"):
         ver = sid.removeprefix("server-version:")
         return f"us · {server_version_names(arena).get(ver) or 'v' + ver}"
+    return sid
+
+
+def lineage_root(arena: Arena, sid: str) -> str:
+    """The oldest ancestor of a submission (following parents within the arena)."""
+    seen = set()
+    while sid in arena.subs and arena.subs[sid].parent in arena.subs and sid not in seen:
+        seen.add(sid)
+        sid = arena.subs[sid].parent
     return sid
 
 
@@ -533,8 +548,10 @@ def make_router(arena: Arena) -> APIRouter:
 
     # ------------------------------------------------------------ one submission
     @r.get("/s/{sid}", response_class=HTMLResponse)
-    def submission_page(sid: str):
+    def submission_page(sid: str, request: Request):
         s = get_sub(sid)
+        me = http.caller(request).owner
+        can_edit = me in (s.owner, "local")
         d = http.sub_json(arena, s, detail=True)
         v = d.get("verdict")
         rt = d.get("rating") or {}
@@ -637,7 +654,26 @@ document.getElementById("promote").onclick = async (ev) => {{
         body = f"""<h1>{e(s.id)}</h1>
 {rejected}
 <div class="grid2"><div>{info}{promote}</div>
-<div><h2 style="margin-top:0">Note</h2><pre>{e(s.note) or '<span class="muted">(no note)</span>'}</pre></div></div>
+<div><h2 style="margin-top:0">Note {'<button class="small" onclick="editNote()">edit</button>' if can_edit else ''}
+<a class="sub" href="/lineage?root={q(lineage_root(arena, s.id))}#{q(s.id)}">lineage</a></h2>
+<pre id="note">{e(s.note) or '<span class="muted">(no note)</span>'}</pre>
+<div id="noteedit" style="display:none"><textarea id="notetext" style="width:100%;min-height:160px">{e(s.note)}</textarea>
+<button onclick="saveNote()">save</button> <button class="small" onclick="location.reload()">cancel</button>
+<span id="notemsg" class="muted"></span></div>
+{f'<details><summary class="muted">{len(s.note_history)} earlier version(s)</summary>' + "".join(
+    f'<p class="muted">{when(h["at"])} by {e(h["by"])}</p><pre>{e(h["note"])}</pre>' for h in reversed(s.note_history))
+  + '</details>' if s.note_history else ''}
+<script>
+function editNote() {{ document.getElementById("note").style.display = "none";
+  document.getElementById("noteedit").style.display = "block"; }}
+async function saveNote() {{
+  const r = await fetch("/api/v1/submissions/{q(s.id)}", {{method: "PATCH",
+    headers: {{"Content-Type": "application/json"}},
+    body: JSON.stringify({{note: document.getElementById("notetext").value}})}});
+  if (r.ok) location.reload();
+  else document.getElementById("notemsg").textContent = (await r.json()).detail || r.status;
+}}
+</script></div></div>
 {log}
 {verdict_html}
 {rep_html}
@@ -765,6 +801,63 @@ watched; its verdict and stats are below.</p>
         return layout(f"Game {g.id}", body, f"/api/v1/games/{g.id}", "/games")
 
     # ------------------------------------------------------------ maps
+    @r.get("/lineage", response_class=HTMLResponse)
+    def lineage_page(bot: str = "", root: str = "", hide_rejected: bool = True, drafts: str = "all"):
+        forest = http.lineage(arena, root or None, bot or None, hide_rejected)
+
+        def keep(n) -> bool:      # "promoted": only ranked nodes, but keep paths to them
+            return drafts != "promoted" or n["lane"] == "ranked" or any(keep(c) for c in n["children"])
+
+        def verdict(n) -> str:
+            vp = n.get("vs_parent")
+            if not vp or not (vp.get("W") or vp.get("D") or vp.get("L")):
+                return ""
+            b = vp.get("beats_parent")
+            word, cls = (("beats", "win") if b else ("loses to", "loss") if b is False else ("ties", "draw"))
+            noise = "" if vp.get("significant") else ' <span class="chip" title="the 95% interval includes 50%">noise</span>'
+            return (f'<span class="chip {cls}">{word} parent</span> {rec(vp)} '
+                    f'<span class="muted">{vp.get("score")}%</span>{noise}')
+
+        def render(n, depth=0) -> str:
+            kids = [c for c in n["children"] if keep(c)]
+            star = '<span title="its bot\'s current ranked version">★</span> ' if n["current"] else ""
+            elo = f' <span class="muted">elo {n["elo"]:.0f}</span>' if n.get("elo") is not None else ""
+            first = (n["note"] or "").strip().splitlines()[0][:140] if n["note"] else ""
+            line = (f'<span class="node" id="{e(n["id"])}">{star}{sub_link(arena, n["id"])} '
+                    f'<a class="chip" href="/bots/{q(n["bot"])}">{e(n["bot"])}</a> '
+                    f'<span class="chip">{e(n["lane"])}</span> {status_chip(n["status"])} {verdict(n)}{elo} '
+                    f'<span class="muted">{who(n["owner"], n["agent"])} · {when(n["created"])}</span>'
+                    + (f'<div class="tnote">{e(first)}</div>' if first else "") + '</span>')
+            if not kids:
+                return f'<li>{line}</li>'
+            inner = "".join(render(c, depth + 1) for c in kids)
+            return (f'<li><details {"open" if depth < 6 else ""}><summary>{line} '
+                    f'<span class="muted">({len(kids)} child{"ren" if len(kids) != 1 else ""})</span></summary>'
+                    f'<ul class="tree">{inner}</ul></details></li>')
+
+        trees = "".join(render(n) for n in forest if keep(n))
+        bots_ = sorted(arena.bots)
+        opt = lambda vals, cur: "".join(f'<option value="{e(x)}"{" selected" if x == cur else ""}>{e(x) or "any"}</option>'
+                                        for x in [""] + list(vals))
+        body = f"""<h1>Lineage</h1>
+<p class="sub">Every submission under the one it was built on (its <code>parent</code>), across bots.
+Each line shows its verdict against its parent; ★ marks each bot's current ranked version. Lines
+that keep beating their parents are where to build next.</p>
+<form class="filters" method="get" action="/lineage">
+<label>bot<select name="bot">{opt(bots_, bot)}</select></label>
+<label>show<select name="drafts"><option value="all"{" selected" if drafts == "all" else ""}>all submissions</option>
+<option value="promoted"{" selected" if drafts == "promoted" else ""}>ranked only (and their ancestors)</option></select></label>
+<label>rejected<select name="hide_rejected"><option value="true"{" selected" if hide_rejected else ""}>hidden</option>
+<option value="false"{"" if hide_rejected else " selected"}>shown</option></select></label>
+<button type="submit">Show</button> <a href="/lineage">reset</a>
+{f'<span class="muted">subtree of {sub_link(arena, root)} · <a href="/lineage">whole forest</a></span>' if root else ''}
+</form>
+{f'<ul class="tree root">{trees}</ul>' if trees else '<p class="muted">nothing to show</p>'}
+<script>if (location.hash) {{ const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (el) {{ el.classList.add("hl"); el.scrollIntoView({{block: "center"}}); }} }}</script>"""
+        return layout("Lineage", body, "/api/v1/lineage" + (f"?root={q(root)}" if root else f"?bot={q(bot)}" if bot else ""),
+                      "/lineage")
+
     @r.get("/maps", response_class=HTMLResponse)
     def maps_page(request: Request):
         rows = []

@@ -28,6 +28,7 @@ The arena is on Tailscale only, and there's no account or password.
 | `/bots/<bot>` | A bot's history: every version, its note, verdict, lineage and head-to-head. |
 | `/s/<id>` | One submission: its note, the verdict against its parent and the top bots, where it loses (by map, by opponent, how its dragons die, CPU), its games, a source download and **Promote**. |
 | `/games/<id>` | Watch a game in the browser, using the toolkit's own replay viewer. |
+| [Lineage]({ARENA}/lineage) | The family tree of all submissions, each with its verdict against its parent. Shows which lines keep improving. |
 | [Ideas]({ARENA}/ideas) | Search everything that's been tried, with outcomes. Check here before starting an idea. |
 | [Maps]({ARENA}/maps) | Per-map stats and map previews. |
 | [Queue]({ARENA}/queue) | What's playing now and what's waiting. |
@@ -92,6 +93,8 @@ numbers stay in Ideas, so nobody repeats the experiment blind.
 | `tokenz mine` · `tokenz whoami` | Your submissions; who the arena thinks you are. |
 | `tokenz queue` | What's playing and waiting. |
 | `tokenz server [battles\|leaderboard\|quota\|gate]` | The competition server. |
+| `tokenz lineage [--bot B] [--root ID]` | The family tree: who was built on whom, each with its verdict against its parent. Also the [Lineage]({ARENA}/lineage) page. |
+| `tokenz note ID ["new note"]` | Show or edit a note (yours only; earlier versions are kept). |
 | `tokenz maps` · `tokenz map-upload FILE [--hidden]` · `tokenz map-remove NAME` | List maps; add a map every bot plays on; remove yours. |
 | `tokenz mcp` | How to add the arena's MCP server to your agent. |
 

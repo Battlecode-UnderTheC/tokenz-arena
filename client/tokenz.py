@@ -405,6 +405,40 @@ def cmd_server(args):
         emit(args, get(args, "/api/v1/server"))
 
 
+def cmd_note(args):
+    note = Path(args.file).read_text() if args.file else args.text
+    if note is None:
+        emit(args, get(args, f"/api/v1/submissions/{urllib.parse.quote(args.id)}"),
+             lambda d: print(d.get("note") or "(no note)"))
+        return
+    body = json.dumps({"note": note}).encode()
+    d = request(args, "PATCH", f"/api/v1/submissions/{urllib.parse.quote(args.id)}", body,
+                "application/json")
+    emit(args, d, lambda d: print(f"updated the note of {d['id']} "
+                                  f"({len(d.get('note_history') or [])} earlier version(s) kept)"))
+
+
+def cmd_lineage(args):
+    def walk(n, prefix="", last=True, top=True):
+        vp = n.get("vs_parent") or {}
+        verdict = ""
+        if vp.get("W") or vp.get("D") or vp.get("L"):
+            b = vp.get("beats_parent")
+            verdict = (f"  {'beats' if b else 'loses to' if b is False else 'ties'} parent {wdl(vp)}"
+                       + ("" if vp.get("significant") else " (noise)"))
+        star = "★ " if n.get("current") else ""
+        line = (f"{star}{n['id']} [{n['lane']}, {n['status']}]{verdict}"
+                + (f"  elo {n['elo']:.0f}" if n.get("elo") is not None else "")
+                + f"  {n['owner']}" + (f"/{n['agent']}" if n.get("agent") else ""))
+        print(("" if top else prefix + ("└─ " if last else "├─ ")) + line)
+        kids = n.get("children") or []
+        for i, c in enumerate(kids):
+            walk(c, prefix + ("" if top else ("   " if last else "│  ")), i == len(kids) - 1, False)
+    emit(args, get(args, "/api/v1/lineage", bot=args.bot, root=args.root,
+                   hide_rejected="true" if not args.rejected else None),
+         lambda forest: [walk(n) for n in forest] or print("(nothing)"))
+
+
 def cmd_maps(args):
     def human(d):
         table([[m["suite"], m["name"], m.get("owner", ""), "x".join(m.get("size") or []),
@@ -530,6 +564,16 @@ def main(argv=None) -> int:
                    choices=["status", "battles", "leaderboard", "quota", "gate"])
     s.add_argument("--limit", type=int, default=10)
     s.set_defaults(f=cmd_server)
+    s = sp.add_parser("note", help="show or edit a submission's note (owner only; history is kept)")
+    s.add_argument("id")
+    s.add_argument("text", nargs="?", help="the new note (omit to just show it)")
+    s.add_argument("--file", help="read the new note from a file")
+    s.set_defaults(f=cmd_note)
+    s = sp.add_parser("lineage", help="the family tree: who was built on whom, with verdicts")
+    s.add_argument("--bot", help="only the trees that contain this bot")
+    s.add_argument("--root", help="only the subtree of this submission")
+    s.add_argument("--rejected", action="store_true", help="include rejected submissions")
+    s.set_defaults(f=cmd_lineage)
     s = sp.add_parser("maps", help="every public map by suite, team uploads included")
     s.set_defaults(f=cmd_maps)
     s = sp.add_parser("map-upload", help="add a map every bot in the arena plays on")

@@ -48,6 +48,7 @@ class Submission:
     promoted: str | None = None
     promoted_by: str | None = None
     warnings: list = field(default_factory=list)   # lints that don't reject (e.g. map names)
+    note_history: list = field(default_factory=list)   # earlier notes: [{at, by, note}]
     opponents: list | None = None   # frozen when its draft or placement starts
 
 

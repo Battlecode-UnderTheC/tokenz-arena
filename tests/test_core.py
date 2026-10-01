@@ -167,3 +167,21 @@ def test_server_maps_supersede_official_copies(arena):
     (server / "uno.map").write_text("MAP 4 4\nMAP_NAME One\n")       # same map as official one.map
     assert [p.stem for p in scheduler.maps(arena, "official")] == ["two"]
     assert [p.stem for p in scheduler.maps(arena, "server")] == ["uno"]
+
+
+def test_note_edit_and_lineage(arena):
+    from fastapi.testclient import TestClient
+    from arena.api.http import create_app
+    p = add(arena, "base")
+    d = add(arena, "base", lane="draft", parent=p.id)
+    c = TestClient(create_app(arena))
+    alice = {"tailscale-user-login": "alice"}            # add() submits as alice
+    assert c.patch(f"/api/v1/submissions/{d.id}", json={"note": "new"},
+                   headers={"tailscale-user-login": "bob"}).status_code == 403
+    r = c.patch(f"/api/v1/submissions/{d.id}", json={"note": "new"}, headers=alice)
+    assert r.status_code == 200 and r.json()["note"] == "new" and len(r.json()["note_history"]) == 1
+    forest = c.get("/api/v1/lineage").json()
+    assert forest[0]["id"] == p.id and forest[0]["children"][0]["id"] == d.id
+    assert c.get(f"/api/v1/lineage?root={d.id}").json()[0]["id"] == d.id
+    assert c.get("/lineage").status_code == 200 and d.id in c.get("/lineage").text
+    assert c.get(f"/s/{d.id}", headers=alice).status_code == 200
