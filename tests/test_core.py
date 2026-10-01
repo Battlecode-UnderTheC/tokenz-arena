@@ -254,3 +254,25 @@ def test_retire_and_promote_replaces(arena):
     r = c.post(f"/api/v1/submissions/{d.id}/promote?replaces={b1.id}", headers=alice)
     assert r.status_code == 200 and r.json()["status"] == "placing"
     assert arena.subs[b1.id].status == "retired" and arena.subs[b1.id].retired_by == "alice"
+
+
+def test_migrate_renames_with_aliases(arena, tmp_path):
+    from arena import migrate
+    from arena.state import Arena as A
+    q1, q2, q3 = add(arena, "gst-queen-1"), add(arena, "gst-queen-2"), add(arena, "gst-queen-3")
+    child = add(arena, "gst-queen-5", lane="draft", parent=q3.id)
+    arena.add_game(Game(id=0, lane="placement", suite="official", map="one", seed=1, a=q1.id,
+                        b=q3.id, winner="A", rounds=500))
+    tsv = tmp_path / "r.tsv"
+    tsv.write_text("old_id\tnew_bot\tnew_id\tteam\tlane\n" + "".join(
+        f"{s.id}\tqueen\tqueen-{i}\tsearch\tx\n" for i, s in ((1, q1), (2, q2), (3, q3), (5, child))))
+    dry = migrate.rename_submissions(arena.cfg, tsv)
+    assert dry["dry_run"] and dry["renamed"] == 4 and (arena.cfg.submissions / q1.id).exists()
+    rep = migrate.rename_submissions(arena.cfg, tsv, dry_run=False)
+    assert rep["lines"] == {"queen": "queen-3"} and len(rep["retired"]) == 2
+    b = A(arena.cfg)
+    assert {"queen-1", "queen-2", "queen-3", "queen-5"} <= set(b.subs)
+    assert b.subs["queen-5"].parent == "queen-3" and b.subs["gst-queen-3-1"].id == "queen-3"
+    assert b.bots["queen"]["current"] == "queen-3" and "gst-queen-1" not in b.bots
+    assert b.subs["queen-1"].status == "retired" and b.games[0].a == "queen-1"
+    assert b.resolve("gst-queen-5-1") == "queen-5"

@@ -109,6 +109,16 @@ def _web(args: argparse.Namespace) -> int:
     return 0
 
 
+def _migrate(args: argparse.Namespace) -> int:
+    from arena import config, migrate
+    cfg = config.load(Path(args.config) if args.config else None)
+    rep = migrate.rename_submissions(cfg, Path(args.table), dry_run=not args.apply)
+    print(json.dumps(rep, indent=1))
+    if not args.apply:
+        print("dry run: nothing written (add --apply, with the engine stopped)")
+    return 0
+
+
 def _status(args: argparse.Namespace) -> int:
     import urllib.request
     url = args.url.rstrip("/") + "/api/v1/leaderboard"
@@ -144,6 +154,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host")
     p.add_argument("--port", type=int)
     p.set_defaults(func=_web)
+    p = sub.add_parser("migrate-renames", help="move submissions into lines from a TSV (engine stopped)")
+    p.add_argument("table", help="TSV: old_id new_bot new_id team lane")
+    p.add_argument("--config")
+    p.add_argument("--apply", action="store_true", help="write the changes (default: dry run)")
+    p.set_defaults(func=_migrate)
     p = sub.add_parser("status", help="the leaderboard in the terminal")
     p.add_argument("--url", default="http://127.0.0.1:8700")
     p.set_defaults(func=_status)

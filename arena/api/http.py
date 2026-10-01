@@ -126,6 +126,7 @@ def find_games(arena: Arena, sub: str | None = None, vs: str | None = None,
                result: str | None = None, limit: int = 50, source: str | None = None) -> list:
     """GET /api/v1/games: matching Game objects, newest first. source: 'arena' (games our judge
     played), 'competition' (real battles downloaded from the competition server) or None (both)."""
+    sub, vs = arena.resolve(sub), arena.resolve(vs)
     out = []
     for g in reversed(arena.games):
         if g.suite == "holdout":          # hidden: only aggregate W-D-L is ever shown
@@ -173,6 +174,7 @@ def lineage(arena: Arena, root: str | None = None, bot: str | None = None,
     def contains_bot(n) -> bool:
         return n["bot"] == bot or any(contains_bot(c) for c in n["children"])
 
+    root = arena.resolve(root)
     if root:
         return [node(subs[root])] if root in subs else []
     forest = [node(s) for s in sorted(kids.get(None, []), key=lambda s: s.created)]
@@ -207,7 +209,7 @@ def set_parent(arena: Arena, sid: str, parent: str | None, by: str) -> object:
         raise HTTPException(404, f"no submission {sid!r}")
     if by not in (s.owner, "local"):
         raise HTTPException(403, f"only {s.owner} can change the parent of {sid}")
-    parent = parent or None
+    parent = arena.resolve(parent or None)
     if parent is not None:
         p = arena.subs.get(parent)
         if not p or p.status == "external":

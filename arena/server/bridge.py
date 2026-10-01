@@ -618,6 +618,7 @@ class Bridge:
         uploaded by hand rather than by auto-submit), and re-labels the server games already
         downloaded for it, so the gate and the pages know which bot is live."""
         ver = str(ver)
+        arena_id = self.arena.resolve(arena_id)
         s = self.arena.subs.get(arena_id)
         if not s or s.status == "external":
             raise Refused(f"no arena submission {arena_id!r}", 404)

@@ -77,6 +77,29 @@ class Game:
     meta: dict = field(default_factory=dict)   # e.g. server battle ids
 
 
+class Subs(dict):
+    """Submissions by id. Ids that were renamed still resolve: `aliases` maps an old id to its
+    current one (data_dir/aliases.json), so links, notes and parents keep working."""
+
+    def __init__(self):
+        super().__init__()
+        self.aliases: dict[str, str] = {}
+
+    def _key(self, k):
+        if k is None or dict.__contains__(self, k):
+            return k
+        return self.aliases.get(k, k)
+
+    def get(self, k, default=None):
+        return dict.get(self, self._key(k), default)
+
+    def __getitem__(self, k):
+        return dict.__getitem__(self, self._key(k))
+
+    def __contains__(self, k):
+        return dict.__contains__(self, self._key(k))
+
+
 class Arena:
     """The arena's state. The engine (`arena run`) owns it and writes every change. The
     website (`arena web`) opens it with readonly=True: it never writes, and refresh() picks up
@@ -87,7 +110,7 @@ class Arena:
         self.readonly = readonly
         self._stamps: dict = {}
         self.lock = threading.RLock()
-        self.subs: dict[str, Submission] = {}
+        self.subs: Subs = Subs()
         self.games: list[Game] = []
         self.bots: dict[str, dict] = {}
         self.running: dict[tuple, dict] = {}     # job key -> {job, started}
@@ -96,7 +119,12 @@ class Arena:
         self._load()
 
     # ----------------------------------------------------------------- persistence
+    def resolve(self, sid: str | None) -> str | None:
+        """The current id of a submission id that may have been renamed."""
+        return self.subs.aliases.get(sid, sid) if sid and not dict.__contains__(self.subs, sid) else sid
+
     def _load(self):
+        self.subs.aliases = store.read_json(self.cfg.data_dir / "aliases.json", {}) or {}
         for meta in sorted(self.cfg.submissions.glob("*/meta.json")):
             d = store.read_json(meta)
             self.subs[d["id"]] = Submission(**d)
@@ -151,6 +179,8 @@ class Arena:
             if changed(self.cfg.data_dir / "bots.json") else None
         ratings = store.read_json(self.cfg.data_dir / "ratings.json", None) \
             if changed(self.cfg.data_dir / "ratings.json") else None
+        aliases = store.read_json(self.cfg.data_dir / "aliases.json", None) \
+            if changed(self.cfg.data_dir / "aliases.json") else None
         hb = store.read_json(self.cfg.data_dir / "heartbeat.json", {}) or {}
         from arena.scheduler import LANES, Job       # (no import cycle at module load)
         prio = {v: k for k, v in LANES.items()}
@@ -162,6 +192,11 @@ class Arena:
                     r["map"], r["seed"], r.get("owner", ""), r.get("for_sub", r["a"]))
             running[j.key] = {"job": j, "started": r.get("started")}
         with self.lock:
+            if aliases is not None:
+                self.subs.aliases = aliases
+                for old in aliases:                   # renamed: drop the copy under its old id
+                    if dict.__contains__(self.subs, old) and old not in subs:
+                        dict.pop(self.subs, old, None)
             self.subs.update(subs)
             if full:
                 self.games = sorted(new_games, key=lambda g: g.id)

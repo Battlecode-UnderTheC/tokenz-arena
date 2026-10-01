@@ -155,6 +155,7 @@ def accept(arena: Arena, *, blob: bytes, bot: str, owner: str, note: str = "",
             return dup, False
         if parent and parent not in arena.subs:
             raise Rejected(f"unknown parent {parent!r}")
+        parent = arena.resolve(parent)
         b = arena.bots.get(bot)
         if b is None:
             arena.bots[bot] = {"owner": owner, "active": True, "current": None}
