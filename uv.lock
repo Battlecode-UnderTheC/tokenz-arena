@@ -702,11 +702,15 @@ name = "tokenz-arena"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "bcweb" },
     { name = "fastapi" },
     { name = "mcp" },
     { name = "unswbc" },
     { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+server = [
+    { name = "bcweb" },
 ]
 
 [package.dev-dependencies]
@@ -716,12 +720,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bcweb", git = "ssh://git@github.com/Battlecode-UnderTheC/bcweb.git" },
+    { name = "bcweb", marker = "extra == 'server'", git = "ssh://git@github.com/Battlecode-UnderTheC/bcweb.git" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "mcp", specifier = ">=1.2" },
     { name = "unswbc", specifier = "==1.2.3" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
+provides-extras = ["server"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]

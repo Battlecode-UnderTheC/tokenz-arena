@@ -8,8 +8,12 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "mcp>=1.2",
-    "bcweb @ git+ssh://git@github.com/Battlecode-UnderTheC/bcweb.git",   # website-only data (quota, brackets)
 ]
+
+[project.optional-dependencies]
+# Website-only competition data (quota, per-map detail, brackets). A private repo in the org,
+# so CI runs without it; poscatgpu2 installs it with `uv sync --extra server`.
+server = ["bcweb @ git+ssh://git@github.com/Battlecode-UnderTheC/bcweb.git"]
 
 [project.scripts]
 arena = "arena.cli:main"
