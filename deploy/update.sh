@@ -25,5 +25,6 @@ docker compose build -q arena
 # Smoke test on the bare image (no network: the compose service shares the sidecar's).
 docker run --rm --network none tokenz-arena:latest \
   python -c "import arena.api.http, arena.daemon, arena.cli; print('smoke ok')"
+docker compose up -d tailscale   # first, so the arena has a namespace to join
 docker compose up -d
 log "deployed $(git rev-parse --short HEAD)"
