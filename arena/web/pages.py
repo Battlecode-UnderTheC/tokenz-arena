@@ -932,18 +932,22 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
         for n in forest:
             newest(n)
 
-        def place(n, depth):
+        def place(n) -> int:
+            """Column = height (steps down to its furthest descendant): every bot nothing is
+            built on sits in column 0 on the left, ancestors further right."""
             kids = sorted(n["children"], key=lambda c: latest[c["id"]], reverse=True)
+            h = 0
             for c in kids:
-                place(c, depth + 1)
+                h = max(h, place(c) + 1)
             if kids:
-                y = pos[kids[0]["id"]][1]      # level with its first child: a line runs straight
+                y = pos[kids[0]["id"]][1]      # level with its newest child: a line runs straight
             else:
                 y = y_next[0]
                 y_next[0] += 1
-            pos[n["id"]] = (depth, y)
+            pos[n["id"]] = (h, y)
+            return h
         for n in sorted(forest, key=lambda n: latest[n["id"]], reverse=True):
-            place(n, 0)
+            place(n)
         depth_max = max(d for d, _ in pos.values())
         width = (depth_max + 1) * (W + GX) + 20
         height = y_next[0] * (H + GY) + 20
@@ -958,7 +962,7 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
                 color = ("var(--muted)" if not played else "var(--win)" if b else
                          "var(--loss)" if b is False else "var(--draw)")
                 dash = ' stroke-dasharray="4 3"' if played and not vp.get("significant") else ""
-                x1, y1, x2, y2 = px + W, py + H / 2, cx, cy + H / 2
+                x1, y1, x2, y2 = px, py + H / 2, cx + W, cy + H / 2   # parent's left -> child's right
                 mx = (x1 + x2) / 2
                 tip = f'{n["id"]} vs parent: {vp.get("W")}-{vp.get("D")}-{vp.get("L")}' if played else "no games vs parent yet"
                 edges.append(f'<path d="M{x1:.0f},{y1:.0f} C{mx:.0f},{y1:.0f} {mx:.0f},{y2:.0f} {x2:.0f},{y2:.0f}" '
@@ -972,13 +976,13 @@ ancestors, with how each step did against its parent ("?" = within noise).</p>
                          f'<text x="{x + 7}" y="{y + 16}">{e(label[:26])}</text>'
                          f'<title>{e(n["id"])} ({e(n["lane"])}, {e(n["status"])}) by {e(n["owner"])}\n'
                          f'{e((n["note"] or "")[:300])}</title></g></a>')
-        return f"""<p class="sub">Roots on the left, newest on the right (it opens at the newest end; scroll
-left for the history). Each line runs straight across; side branches drop below it. Edges: <span class="W">green</span> beat its parent,
+        return f"""<p class="sub">The bots we have on the left, their ancestors to the right (scroll right for the
+history). Each line runs straight across, newest line on top; side branches drop below. Edges: <span class="W">green</span> beat its parent,
 <span class="L">red</span> lost, <span class="D">yellow</span> tied, dashed = within noise, grey = not measured.
 ★ = each bot's current ranked version; ranked versions have a bold border. Click a box to open it.</p>
 <div class="graphwrap" id="lgw"><svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" class="lgraph">
 {"".join(edges)}{"".join(boxes)}</svg></div>
-<script>const w = document.getElementById("lgw"); w.scrollLeft = w.scrollWidth;</script>"""
+"""
 
     @r.get("/lineage", response_class=HTMLResponse)
     def lineage_page(view: str = "bots", bot: str = "", root: str = "", hide_rejected: bool = True,
