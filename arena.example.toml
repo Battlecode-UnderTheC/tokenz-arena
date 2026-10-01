@@ -1,0 +1,30 @@
+# Copy to arena.toml (not committed). Paths are relative to data_dir unless absolute.
+data_dir = "~/tokenz-arena-data"
+
+[submit]
+max_zip_mb = 10
+max_queued_drafts = 8       # per owner; more returns 429
+
+[play]
+workers = 6                 # parallel games; set from the measured cost of a 500-round game
+reference_bot = "reference" # rated 1000; a bot submitted at setup
+draft_top_n = 3
+
+[maps]
+official = "<repo>/maps/official"   # <repo> = this checkout
+rotating = "maps/rotating"
+holdout = "maps/holdout"            # data_dir only; never committed, never served
+
+[seeds]
+official = [1592614637, 1, 2]
+rotating = [1592614637]
+holdout = [1592614637]
+
+[retention]
+draft_days = 3
+replay_days = 14
+replay_cap_gb = 40
+
+[api]
+host = "100.0.0.0"          # the tailnet address
+port = 8700
