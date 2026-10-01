@@ -93,10 +93,13 @@ def rename_submissions(cfg: Config, table: Path, dry_run: bool = True) -> dict:
         return report
 
     # write: folders, metas, games, bots, ratings, bridge links, aliases
-    for old, new in idmap.items():
-        for base in (cfg.submissions, cfg.bots):
-            if (base / old).exists():
-                (base / old).rename(base / new)
+    # two phases, via temporary names: a table may give a freed id to another submission
+    for phase in ("tmp", "final"):
+        for old, new in idmap.items():
+            src, dst = (old, f".mig-{old}") if phase == "tmp" else (f".mig-{old}", new)
+            for base in (cfg.submissions, cfg.bots):
+                if (base / src).exists():
+                    (base / src).rename(base / dst)
     for s in list(arena.subs.values()):
         s.id = fix(s.id)
         store.write_json(cfg.submissions / s.id / "meta.json", asdict(s))
@@ -115,6 +118,8 @@ def rename_submissions(cfg: Config, table: Path, dry_run: bool = True) -> dict:
     aliases = store.read_json(cfg.data_dir / "aliases.json", {}) or {}
     aliases = {k: fix(v) for k, v in aliases.items()}
     aliases.update(idmap)
+    taken = {fix(x) for x in ren} | set(idmap.values())
+    aliases = {k: v for k, v in aliases.items() if k not in taken}   # an id in use isn't an alias
     store.write_json(cfg.data_dir / "aliases.json", aliases)
     report["dry_run"] = False
     return report

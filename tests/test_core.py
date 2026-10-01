@@ -276,3 +276,19 @@ def test_migrate_renames_with_aliases(arena, tmp_path):
     assert b.bots["queen"]["current"] == "queen-3" and "gst-queen-1" not in b.bots
     assert b.subs["queen-1"].status == "retired" and b.games[0].a == "queen-1"
     assert b.resolve("gst-queen-5-1") == "queen-5"
+
+
+def test_migrate_reuses_a_freed_id(arena, tmp_path):
+    from arena import migrate
+    from arena.state import Arena as A
+    old = add(arena, "gst-queen-1")                           # gst-queen-1-1 -> queen-1
+    newer = add(arena, "queen", lane="draft", parent=old.id)  # queen-1 (really v6) -> queen-6
+    assert newer.id == "queen-1"
+    tsv = tmp_path / "r.tsv"
+    tsv.write_text("old_id\tnew_bot\tnew_id\tteam\tlane\n"
+                   f"{old.id}\tqueen\tqueen-1\tsearch\tranked\nqueen-1\tqueen\tqueen-6\tsearch\tdraft\n")
+    migrate.rename_submissions(arena.cfg, tsv, dry_run=False)
+    b = A(arena.cfg)
+    assert b.subs["queen-6"].parent == "queen-1" and b.subs["queen-1"].sha256 == old.sha256
+    assert b.resolve("gst-queen-1-1") == "queen-1" and b.resolve("queen-1") == "queen-1"
+    assert (arena.cfg.bots / "queen-6").exists() and (arena.cfg.bots / "queen-1").exists()
