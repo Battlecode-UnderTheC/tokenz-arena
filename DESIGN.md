@@ -14,7 +14,7 @@ agent loop measures against.
   means on the server.
 - **One HTTP API does everything.** Submit a zip, poll or wait for its verdict, read
   reports, download replays and sources. An agent needs nothing but `curl` (or the MCP
-  tools), and there's no GitHub, CI or token plumbing between an idea and its result.
+  tools), and there's no GitHub, CI or account plumbing between an idea and its result.
 - **A submission is an experiment.** It carries its parents and a note (the hypothesis and
   what changed). The arena pairs that note with measured results, so the submission history
   is the team's experiment log.
@@ -83,7 +83,7 @@ POST zip --> api --> checks --> submissions/<id>/{meta.json, source.zip}
 
 | Module | Job |
 |---|---|
-| `arena/config.py` | Loads `arena.toml`: paths, workers, map pools, seeds, tokens file. |
+| `arena/config.py` | Loads `arena.toml`: paths, workers, map pools, seeds. |
 | `arena/store.py` | JSON files, one per record, atomic writes; everything is loaded into memory on start. |
 | `arena/submit.py` | Validates an uploaded zip, freezes it, runs the checks. |
 | `arena/runner.py` | Runs one game with `unswbc run --sandbox -v` and parses verdict, deaths and CPU points. |
@@ -96,12 +96,13 @@ POST zip --> api --> checks --> submissions/<id>/{meta.json, source.zip}
 | `arena/api/mcp.py` | The same as MCP tools. |
 | `arena/server/proxy.py` | `/unswbc/api/v1/*`: the toolkit-compatible API, with uploads as arena submissions, cached pass-through for the rest, and activate refused. |
 | `arena/server/bridge.py` | Auto-submit behind the champion gate, auto-download of battles and replays, the server suite (section 8). |
-| `arena/cli.py` | `arena serve`, `arena status`, `arena play`, `arena token`, `arena server <status\|pause\|resume>`. |
+| `arena/who.py` | Who's calling: the teammate's tailnet login, from Tailscale (section 1). |
+| `arena/cli.py` | `arena serve`, `arena status`, `arena play`, `arena server <status\|pause\|resume>`. |
 
 ## 1. Submitting
 
 ```
-POST /api/v1/submissions          Authorization: Bearer <teammate token>
+POST /api/v1/submissions          (no auth: the caller is known from Tailscale)
   multipart: file = bot.zip       an unswbc project: bot.toml at the root (or one folder down)
              bot = "swarm"        the bot's name; its submissions form a line
              parent = "<id>"      optional: the submission this builds on (anyone's)
@@ -130,8 +131,24 @@ POST /api/v1/submissions          Authorization: Bearer <teammate token>
   - **Promote** a draft (`POST .../promote`), or submit with `lane = "ranked"`, and it gets
     full placement and joins the leaderboard as its bot's current submission.
   - Agents iterate on drafts and promote only what beats its parent.
-- **Auth:** one bearer token per teammate (`arena token add <name>`), stored hashed. Tokens
-  are needed only to submit and promote. Reads are open on the tailnet.
+- **Who's who (no auth):** the arena is reachable only on the tailnet, so there are no
+  tokens or passwords. Tailscale already knows who is calling, and the arena asks it:
+  - Behind `tailscale serve`, each request carries `Tailscale-User-Login` (e.g.
+    `alice@github`) and `Tailscale-User-Name`.
+  - Direct connections are looked up with the local Tailscale API (`tailscale whois <ip>`).
+
+  The login becomes the submission's `owner`. Teammates and their agents need no setup:
+  whatever runs on Alice's laptop submits as Alice.
+  - **Agent label:** an optional `agent` field (or, for the toolkit, the value given to
+    `unswbc auth set`, which it sends as the bearer token) labels which of a teammate's
+    agents submitted. It shows next to the owner (`alice / worker-3`) and lets a teammate
+    filter their own loop's submissions. It's a label, not a secret.
+  - **Shared machines:** tagged devices (a server running someone's agents, poscatgpu2
+    itself) have no user login. Their submissions are owned by the device name (`tag:ci /
+    gpu-box`) unless they pass `owner`. Only devices without a user login may pass `owner`.
+  - Fair share and the per-owner draft cap (section 3) use this owner.
+  - It's only enough to tell teammates apart. Anyone on the tailnet can do anything the API
+    allows, which is fine for a team.
 - **Checks** (a submission that fails is `rejected`, with the reason and the judge's log in
   the API):
   1. The zip is safe: size limit, no absolute paths or `..`, no links. `bot.toml` parses, and
@@ -200,8 +217,8 @@ page for agents.
 
 | Endpoint | Returns |
 |---|---|
-| `POST /api/v1/submissions` | Submit a zip (section 1). Needs a token. |
-| `POST /api/v1/submissions/{id}/promote` | Draft to ranked. The owner's token. |
+| `POST /api/v1/submissions` | Submit a zip (section 1). |
+| `POST /api/v1/submissions/{id}/promote` | Draft to ranked. Recorded with who promoted it. |
 | `GET /api/v1/submissions/{id}` | Status, checks, rejection reason, parent, note, draft verdict. `?wait=S` blocks until the verdict is in. |
 | `GET /api/v1/submissions/{id}/report` | The diagnostic report (section 5). |
 | `GET /api/v1/submissions/{id}/source` | The zip. |
@@ -215,7 +232,7 @@ page for agents.
 | `GET /api/v1/stats/maps` | Per map: games, how they end, first-seat advantage. |
 | `GET /api/v1/queue` | What's playing and waiting, by lane and owner. |
 | `GET /api/v1/server` | The server bridge's state (section 8). |
-| `POST /api/v1/server/pause`, `/resume` | Teammate token. Pause or resume auto-submit. |
+| `POST /api/v1/server/pause`, `/resume` | Pause or resume auto-submit. Recorded with who did it. |
 | `/unswbc/api/v1/*` | The competition server's API, proxied (section 8). Point `UNSWBC_SERVER` here. |
 | `GET /health` | Daemon heartbeat, workers, unswbc version, disk free. |
 | `GET /llms.txt` | A plain-text guide to all of the above. |
@@ -239,7 +256,7 @@ agent always see the same numbers.
 | `/games?…` | Filterable game list (bot, opponent, map, result). |
 | `/maps` | Per-map stats, with a preview of each map. |
 | `/ideas` | Searchable notes with outcomes: the experiment log. |
-| `/submit` | Upload form (token, zip, bot, parent, note) for people who aren't using curl. |
+| `/submit` | Upload form (zip, bot, parent, note, source) for people who aren't using curl. Shows "submitting as alice@github". |
 | `/queue` | What's playing now and what's waiting. |
 | `/server` | The competition server: live bot, rank, battles with replays, quota, the candidate and why. |
 
@@ -262,8 +279,8 @@ talks to whatever server `UNSWBC_SERVER` names. So the arena serves that same AP
 Three behaviours:
 
 **1. Proxy.** Requests the arena doesn't handle itself are forwarded to the real server
-with the team's key. The teammate's arena token comes in, the team key goes out, and the
-key never leaves poscatgpu2.
+with the team's key. Teammates send no credentials (any bearer value is just their agent
+label), the team key goes out, and the key never leaves poscatgpu2.
 - **Reads** (`/me`, `/team`, `/submissions`, `/battles`, `/leaderboard`, `/ratings`,
   `/teams`, `/tournaments`, `/maps`, `/queue`) are cached: leaderboard and ratings for 60 s,
   battles for 15 s, finished battles and replays forever. One key serves the whole team,
@@ -279,7 +296,7 @@ key never leaves poscatgpu2.
 
 ```sh
 export UNSWBC_SERVER=http://<arena>.<tailnet>.ts.net:8700/unswbc
-unswbc auth set <arena token>
+unswbc auth set worker-3          # the toolkit insists on a key; here it's just an agent label
 unswbc submit mybot -n swarm \
   -d "parent=swarm-6; source=https://github.com/<org>/<repo>/tree/<sha>/bots/swarm; lunge at enemy heads"
 ```
@@ -306,7 +323,7 @@ submission:
 
   It submits at most once every `min_hours` (default 4), well inside the site's 12 uploads
   an hour. Every upload, and every candidate held back with the failed condition, is
-  logged. A teammate can pause it from the website.
+  logged. Any teammate can pause it from the website, and the log records who did.
 - **Auto-download.** It polls `GET /battles` once a minute. For every finished game it
   downloads the replay (following the signed redirect without sending the key on), and
   keeps the battle's `log` (why a game crashed or timed out). Each game becomes an arena
@@ -340,10 +357,11 @@ challenges and tournaments.
 - One systemd user service (`deploy/arena.service`, running `arena serve`). Run
   `loginctl enable-linger` so it survives logout.
 - State lives in `~/tokenz-arena-data/`: `submissions/`, `games/`, `replays/`, `work/`,
-  `maps/holdout/`, `tokens.json`, `ratings.json`, `logs/`. Back it up with `rsync`.
+  `maps/holdout/`, `ratings.json`, `logs/`. Back it up with `rsync`.
 - Network: Tailscale only. `tailscale serve` gives it an HTTPS name on the tailnet
-  (`https://poscatgpu2.<tailnet>.ts.net`). It's never exposed publicly, but tokens are still
-  needed to submit, because tailnet members aren't all trusted to change the live bot.
+  (`https://poscatgpu2.<tailnet>.ts.net`). It's never exposed publicly, and there's no auth
+  beyond being on the tailnet. Teammates are told apart by their Tailscale login (section 1).
+  The tailnet's ACLs decide who can reach it at all.
 
 ## Build order
 
@@ -355,7 +373,7 @@ challenges and tournaments.
 5. Replay and source downloads, games, `/ideas`, `/llms.txt`.
 5b. The website: leaderboard, submission, game (with the viewer) and submit pages first.
 6. MCP.
-7. Deploy on poscatgpu2, tokens for teammates; seed it with our best bots.
+7. Deploy on poscatgpu2 behind `tailscale serve`; seed it with our best bots.
 8. Holdout, continuous matches, retention, the remaining web pages.
 9. The server bridge, in this order: the read proxy and auto-download (read-only); toolkit
    uploads as arena submissions; the server suite; auto-submit. The key goes on poscatgpu2 by

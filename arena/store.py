@@ -4,7 +4,6 @@
     submissions/<id>/source.zip     the uploaded bot, kept forever
     games/<id>.json                 one finished game: seats, map, seed, verdict, stats
     replays/<game id>.replay        pruned by retention; the game file keeps its verdict
-    tokens.json                     owner -> sha256 of their submit token
     ratings.json                    the latest Bradley-Terry fit (derived; safe to delete)
 
 Only the arena process writes, and every write is a temp file plus an atomic rename, so a

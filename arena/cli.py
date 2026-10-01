@@ -32,7 +32,6 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_play)
     for name, what in [("serve", "the arena: HTTP API, MCP, scheduler and judge workers"),
                        ("status", "the leaderboard in the terminal"),
-                       ("token", "add or revoke a teammate's submit token"),
                        ("import-server", "import a competition battle's replays")]:
         sub.add_parser(name, help=f"{what} (not built yet)").set_defaults(func=None)
     args = parser.parse_args(argv)

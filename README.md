@@ -34,7 +34,7 @@ Submitting (once the API is built):
 
 ```sh
 zip -r bot.zip mybot/
-curl -H "Authorization: Bearer $TOKEN" -F file=@bot.zip -F bot=swarm \
+curl -F file=@bot.zip -F bot=swarm \
      -F parent=swarm-6 -F note="lunge at enemy heads" http://<arena>:8700/api/v1/submissions
 curl "http://<arena>:8700/api/v1/submissions/swarm-7?wait=600"
 ```

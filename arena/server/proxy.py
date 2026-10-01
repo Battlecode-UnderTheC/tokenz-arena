@@ -10,7 +10,8 @@ served by the arena so teammates can point the toolkit at it (`UNSWBC_SERVER`).
                                battles 15 s, finished battles and replays forever); on 429 the
                                cached copy is served, marked stale
 
-Incoming: the teammate's arena token. Outgoing: the team key, read from outside data_dir and
+Incoming: no credentials; the caller is known from Tailscale (who.py), and any bearer value
+is only an agent label. Outgoing: the team key, read from outside data_dir and
 never logged. Replay downloads follow the signed redirect without forwarding the key.
 """
 
