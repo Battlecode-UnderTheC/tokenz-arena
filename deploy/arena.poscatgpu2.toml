@@ -23,7 +23,7 @@ rotating = [1592614637]
 holdout = [1592614637]
 
 [server]
-key_file = "/secrets/unswbc-key"
+key_file = "/secrets/keys.json"   # the toolkit's keys.json format (copied from the Mac)
 auto_submit = true
 min_hours = 4
 poll_seconds = 60
