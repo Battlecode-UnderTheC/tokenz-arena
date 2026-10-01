@@ -166,6 +166,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--idle-exit", type=float, help="exit after this many seconds with nothing to do "
                                                     "(or ARENA_IDLE_EXIT; for batch jobs)")
     p.set_defaults(func=lambda a: __import__("arena.worker", fromlist=["main"]).main(a))
+    p = sub.add_parser("tailscale-key", help="mint the Tailscale auth key remote workers join with")
+    p.add_argument("--dir", default="~/.config/tokenz-arena",
+                   help="holds tailscale-oauth-id and tailscale-oauth (the OAuth client)")
+    p.add_argument("--tag", default="tag:tokens-worker")
+    p.add_argument("--days", type=int, default=90)
+    p.add_argument("--out", help="where to write the key (default <dir>/worker-ts-authkey)")
+    p.set_defaults(func=lambda a: __import__("arena.tskey", fromlist=["main"]).main(a))
     p = sub.add_parser("migrate-renames", help="move submissions into lines from a TSV (engine stopped)")
     p.add_argument("table", help="TSV: old_id new_bot new_id team lane")
     p.add_argument("--config")

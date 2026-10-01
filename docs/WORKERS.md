@@ -79,7 +79,7 @@ token that has `read:packages` (`docker login ghcr.io`).
 | Variable | |
 |---|---|
 | `ARENA_WORKER_TOKEN` | Required: a token from the arena's `[workers] tokens`. |
-| `TS_AUTHKEY` | A Tailscale auth key (reusable, ephemeral, tagged `tag:arena-worker`). The worker joins the tailnet itself in userspace mode: no root, no `/dev/net/tun`, no `--privileged`. Leave it out on a machine that already reaches the arena. |
+| `TS_AUTHKEY` | The workers' Tailscale auth key (reusable, ephemeral, pre-approved, tagged `tag:tokens-worker`), minted on poscatgpu2 by `arena tailscale-key` into `~/.config/tokenz-arena/worker-ts-authkey`. The worker joins the tailnet itself in userspace mode: no root, no `/dev/net/tun`, no `--privileged`. Leave it out on a machine that already reaches the arena. |
 | `ARENA_URL` | Default `https://tokenz-arena.lonk-kelvin.ts.net`. |
 | `WORKER_NAME` | Default: the Batch job id, else the host name. |
 | `ARENA_SLOTS` | Games at once. Default: cores ÷ 1.5. |
@@ -134,6 +134,14 @@ uv run arena worker --arena https://tokenz-arena.<tailnet>.ts.net --token ... --
   cores at peak.
 - **Leaving.** `SIGTERM` stops leasing, finishes the running games (up to 10 minutes; an abandoned
   lease just expires and the game is played again), and exits.
+
+## The Tailscale key
+
+`arena tailscale-key` (run on poscatgpu2) uses a Tailscale OAuth client with the Auth Keys scope
+(`~/.config/tokenz-arena/tailscale-oauth-id` and `tailscale-oauth`) to mint the workers' key:
+reusable, ephemeral, pre-approved, tagged `tag:tokens-worker`, 90 days. Workers only ever get that
+key, never the OAuth client. Re-run it before the key expires. The tailnet policy limits
+`tag:tokens-worker` to `tokenz-arena:443`, so a worker can reach the arena and nothing else.
 
 ## Turning it on
 
