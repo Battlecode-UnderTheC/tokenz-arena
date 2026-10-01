@@ -76,8 +76,14 @@ class Game:
 
 
 class Arena:
-    def __init__(self, cfg: Config):
+    """The arena's state. The engine (`arena run`) owns it and writes every change. The
+    website (`arena web`) opens it with readonly=True: it never writes, and refresh() picks up
+    the engine's changes from the files (called every second)."""
+
+    def __init__(self, cfg: Config, readonly: bool = False):
         self.cfg = cfg
+        self.readonly = readonly
+        self._stamps: dict = {}
         self.lock = threading.RLock()
         self.subs: dict[str, Submission] = {}
         self.games: list[Game] = []
@@ -102,10 +108,69 @@ class Arena:
                 s.status = QUEUED
 
     def save_sub(self, s: Submission):
-        store.write_json(self.cfg.submissions / s.id / "meta.json", asdict(s))
+        if not self.readonly:
+            store.write_json(self.cfg.submissions / s.id / "meta.json", asdict(s))
 
     def save_bots(self):
-        store.write_json(self.cfg.data_dir / "bots.json", self.bots)
+        if not self.readonly:
+            store.write_json(self.cfg.data_dir / "bots.json", self.bots)
+
+    def refresh(self, full: bool = False):
+        """A read-only replica catching up with the engine's files: changed submissions (by
+        mtime), new games (ids count up), bots, ratings and what's running (heartbeat).
+        `full` also reloads every game, for rare in-place edits (re-labels, pruned replays)."""
+        def changed(p: Path) -> bool:
+            try:
+                m = p.stat().st_mtime_ns
+            except FileNotFoundError:
+                return False
+            if self._stamps.get(p) == m:
+                return False
+            self._stamps[p] = m
+            return True
+        subs = {}
+        for meta in self.cfg.submissions.glob("*/meta.json"):
+            if changed(meta):
+                d = store.read_json(meta)
+                if d:
+                    subs[d["id"]] = Submission(**d)
+        new_games = []
+        if full:
+            new_games = [Game(**g) for g in store.load_all(self.cfg.games, "*.json")]
+        else:
+            nxt = (self.games[-1].id + 1) if self.games else 1
+            while (p := self.cfg.games / f"{nxt}.json").exists():
+                d = store.read_json(p)
+                if not d:
+                    break
+                new_games.append(Game(**d))
+                nxt += 1
+        bots = store.read_json(self.cfg.data_dir / "bots.json", None) \
+            if changed(self.cfg.data_dir / "bots.json") else None
+        ratings = store.read_json(self.cfg.data_dir / "ratings.json", None) \
+            if changed(self.cfg.data_dir / "ratings.json") else None
+        hb = store.read_json(self.cfg.data_dir / "heartbeat.json", {}) or {}
+        from arena.scheduler import LANES, Job       # (no import cycle at module load)
+        prio = {v: k for k, v in LANES.items()}
+        running = {}
+        for r in hb.get("running") or []:
+            if not isinstance(r, dict):
+                continue
+            j = Job(r.get("priority", prio.get(r.get("lane"), 3)), r["a"], r["b"], r["suite"],
+                    r["map"], r["seed"], r.get("owner", ""), r.get("for_sub", r["a"]))
+            running[j.key] = {"job": j, "started": r.get("started")}
+        with self.lock:
+            self.subs.update(subs)
+            if full:
+                self.games = sorted(new_games, key=lambda g: g.id)
+            elif new_games:
+                self.games.extend(new_games)
+            if bots is not None:
+                self.bots = bots
+            if ratings is not None:
+                self.ratings = ratings
+            self.running = running
+            self.heartbeat = hb
 
     def add_game(self, g: Game) -> Game:
         with self.lock:
@@ -115,7 +180,8 @@ class Arena:
             return g
 
     def save_game(self, g: Game):
-        store.write_json(self.cfg.games / f"{g.id}.json", asdict(g))
+        if not self.readonly:
+            store.write_json(self.cfg.games / f"{g.id}.json", asdict(g))
 
     # ----------------------------------------------------------------- queries
     def next_id(self, bot: str) -> str:

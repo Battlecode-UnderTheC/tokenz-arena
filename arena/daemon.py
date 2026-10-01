@@ -13,11 +13,12 @@ import shutil
 import threading
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
-from arena import rating, runner, scheduler, stats, store, submit
+from arena import judge, rating, scheduler, store, submit
 from arena.state import CHECKING, ENGINE, Arena, Game, now
 
 log = logging.getLogger("arena")
@@ -30,6 +31,9 @@ class Daemon:
         self.workers = int(cfg.get("play", "workers", 4))
         # workers = 0: a read-only arena (serves and imports, never plays or checks)
         self.pool = ThreadPoolExecutor(max(1, self.workers), thread_name_prefix="judge")
+        # Each game (the judge run and parsing its log) happens in a worker process; the
+        # threads above only wait on them, so the engine's own process stays responsive.
+        self.procs = ProcessPoolExecutor(max(1, self.workers), mp_context=mp.get_context("spawn"))
         self.checking: set[str] = set()
         self.tasks: list[tuple[float, Callable[[], None], str]] = []   # (period s, fn, name)
         self.last_run: dict[str, float] = {}
@@ -69,8 +73,14 @@ class Daemon:
 
     def _tick(self):
         a = self.arena
+        with a.lock:
+            running = [{"priority": r["job"].priority, "a": r["job"].a, "b": r["job"].b,
+                        "suite": r["job"].suite, "map": r["job"].map, "seed": r["job"].seed,
+                        "owner": r["job"].owner, "for_sub": r["job"].for_sub, "started": r["started"]}
+                       for r in a.running.values()]
         store.write_json(a.cfg.data_dir / "heartbeat.json",
-                         {"at": now(), "running": len(a.running), "checking": sorted(self.checking)})
+                         {"at": now(), "workers": self.workers, "running": running,
+                          "checking": sorted(self.checking)})
         for period, fn, name in self.tasks:
             if time.time() - self.last_run.get(name, 0) >= period:
                 self.last_run[name] = time.time()
@@ -113,15 +123,16 @@ class Daemon:
         g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
                  a=job.a, b=job.b, meta={"engine": ENGINE})
         try:
-            r = runner.play(Path(job.map), cfg.bots / job.a, cfg.bots / job.b, job.seed,
-                            cfg.work / "replays", work_root=cfg.work,
-                            timeout=cfg.get("play", "game_timeout", 1800))
-            g.winner, g.rounds, g.reason, g.seconds = r.winner, r.rounds, r.reason, round(r.seconds, 1)
-            g.stats = stats.extract(r)
-            replay = r.replay
-        except runner.JudgeError as e:
-            g.error = str(e)[:2000]
-            replay = None
+            res = self.procs.submit(judge.run_game, job.map, str(cfg.bots / job.a),
+                                    str(cfg.bots / job.b), job.seed, str(cfg.work / "replays"),
+                                    str(cfg.work), cfg.get("play", "game_timeout", 1800)).result()
+            if res.get("error"):
+                g.error = res["error"]
+                replay = None
+            else:
+                g.winner, g.rounds, g.reason = res["winner"], res["rounds"], res["reason"]
+                g.seconds, g.stats = res["seconds"], res["stats"]
+                replay = Path(res["replay"]) if res.get("replay") else None
         except Exception as e:
             g.error = f"internal: {e}"
             replay = None

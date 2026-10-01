@@ -1,7 +1,7 @@
 # poscatgpu2: the arena behind a Tailscale sidecar.
 #   cp deploy/env.example .env   (TS_AUTHKEY, paths)   then: docker compose up -d --build
-# The arena shares the sidecar's network namespace and listens on 127.0.0.1:8700 only, so the
-# one way in is `tailscale serve` (HTTPS on the tailnet), which adds Tailscale-User-Login.
+# The engine and the website share the sidecar's network namespace and listen on 127.0.0.1
+# only, so the one way in is `tailscale serve` (HTTPS on the tailnet) to the website.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -16,12 +16,15 @@ services:
       - ./deploy/serve.json:/config/serve.json:ro
     restart: unless-stopped
 
-  arena:
+  # The engine: the only writer (scheduler, judge worker processes, server bridge), with an
+  # internal API on 127.0.0.1:8701 that the website forwards writes to.
+  engine: &arena
     image: tokenz-arena:latest
     build:
       context: .
       additional_contexts:
         bcweb: ${BCWEB_DIR:-../bcweb}
+    command: ["arena", "run", "--config", "/data/arena.toml"]
     user: "${ARENA_UID:-1000}:${ARENA_GID:-1000}"   # files in ARENA_DATA stay the host user's
     network_mode: service:tailscale
     depends_on: [tailscale]
@@ -31,6 +34,14 @@ services:
       - ${ARENA_SECRETS:-~/.config/tokenz-arena}:/secrets:ro
     restart: unless-stopped
     stop_grace_period: 30s
+
+  # The website, API and MCP on 127.0.0.1:8700 (behind tailscale serve): a read-only copy of
+  # the state, refreshed every second. It runs no games, so pages stay fast.
+  web:
+    <<: *arena
+    command: ["arena", "web", "--config", "/data/arena.toml", "--port", "8700"]
+    depends_on: [tailscale, engine]
+    stop_grace_period: 5s
 
 volumes:
   ts-state:

@@ -24,8 +24,12 @@ FINAL = {DONE, RATED, REJECTED, "retired"}
 
 
 def caller(request: Request, agent: str | None = None, owner: str | None = None) -> who.Caller:
-    return who.identify(request.headers, request.client.host if request.client else None,
-                        agent, owner)
+    ip = request.client.host if request.client else None
+    # A write forwarded by the website process carries the original caller's address; it's
+    # trusted only from localhost (the website and the engine share the sidecar's network).
+    if ip in ("127.0.0.1", "::1") and request.headers.get("x-arena-client-ip"):
+        ip = request.headers["x-arena-client-ip"]
+    return who.identify(request.headers, ip, agent, owner)
 
 
 def sub_json(arena: Arena, s, detail: bool = False) -> dict:
@@ -286,14 +290,53 @@ def queue(arena: Arena) -> dict:
             if left:
                 waiting[s.id] = {"owner": s.owner, "lane": s.lane, "games_left": left,
                                  "games_total": len(owed)}
-    return {"workers": getattr(getattr(arena, "daemon", None), "workers", 0),
+    return {"workers": workers_of(arena),
             "running": running, "checking": checking, "waiting": waiting}
 
 
-def create_app(arena: Arena) -> FastAPI:
+def workers_of(arena: Arena) -> int:
+    d = getattr(arena, "daemon", None)
+    if d is not None:
+        return d.workers
+    return int((getattr(arena, "heartbeat", None) or {}).get("workers") or 0)
+
+
+FORWARD_DROP = {"host", "content-length", "connection", "x-arena-client-ip", "accept-encoding"}
+
+
+def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
+    """The HTTP app. In the website process (`arena web`) arena is a read-only replica and
+    engine_url the engine's internal address: writes under /api/ (anything but GET) and all of
+    /api/v1/server go to the engine, everything else is answered from the replica."""
     who.TRUST_HEADERS = bool(arena.cfg.get("api", "trust_tailscale_headers", False))
     app = FastAPI(title="tokenz-arena", version="0.1", docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
+    if engine_url:
+        import httpx2 as httpx
+        from fastapi.responses import Response
+
+        @app.middleware("http")
+        async def to_engine(request: Request, call_next):
+            path = request.url.path
+            if path.startswith("/api/") and (request.method not in ("GET", "HEAD", "OPTIONS")
+                                             or path.startswith("/api/v1/server")):
+                headers = {k: v for k, v in request.headers.items() if k.lower() not in FORWARD_DROP}
+                headers["x-arena-client-ip"] = request.client.host if request.client else ""
+                try:
+                    async with httpx.AsyncClient(timeout=900) as c:
+                        r = await c.request(request.method, engine_url + path,
+                                            params=list(request.query_params.multi_items()),
+                                            content=await request.body(), headers=headers)
+                except httpx.HTTPError as ex:
+                    return JSONResponse({"detail": f"the arena engine is unavailable ({type(ex).__name__}); "
+                                                   "try again in a moment"}, status_code=503)
+                if request.method not in ("GET", "HEAD"):
+                    await asyncio.to_thread(arena.refresh)      # show the change at once
+                keep = {k: v for k, v in r.headers.items()
+                        if k.lower() in ("content-type", "retry-after", "content-disposition")}
+                return Response(r.content, status_code=r.status_code, headers=keep)
+            return await call_next(request)
+
     api = APIRouter(prefix="/api/v1")
 
     def get_sub(sid: str):
@@ -338,6 +381,7 @@ def create_app(arena: Arena) -> FastAPI:
         deadline = asyncio.get_event_loop().time() + wait
         while wait and s.status not in FINAL and asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(2)
+            s = arena.subs.get(s.id, s)      # a replica's refresh swaps in new objects
         return sub_json(arena, s, detail=True)
 
     @api.patch("/submissions/{sid}")
@@ -457,7 +501,7 @@ def create_app(arena: Arena) -> FastAPI:
             arena.cfg.data_dir / "heartbeat.json", {})
         du = shutil.disk_usage(arena.cfg.data_dir)
         return {"ok": True, "started": arena.started, "heartbeat": hb,
-                "workers": getattr(getattr(arena, "daemon", None), "workers", 0),
+                "workers": workers_of(arena),
                 "unswbc": version("unswbc"), "submissions": len(arena.subs),
                 "games": len(arena.games), "disk_free_gb": round(du.free / 2**30, 1)}
 

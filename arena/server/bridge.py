@@ -114,10 +114,13 @@ class Bridge:
         return self.client.configured
 
     def _save(self, name: str):
-        store.write_json(self.dir / f"{name}.json", getattr(self, name))
+        if not getattr(self.arena, "readonly", False):     # the website's replica never writes
+            store.write_json(self.dir / f"{name}.json", getattr(self, name))
 
     def record(self, action: str, **fields):
         """Appends one line to server/log.jsonl."""
+        if getattr(self.arena, "readonly", False):
+            return
         line = {"at": now(), "action": action, **fields}
         self.dir.mkdir(parents=True, exist_ok=True)
         with self.lock, open(self.dir / "log.jsonl", "a") as f:

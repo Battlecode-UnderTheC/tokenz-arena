@@ -25,6 +25,7 @@ docker compose build -q arena
 # Smoke test on the bare image (no network: the compose service shares the sidecar's).
 docker run --rm --network none tokenz-arena:latest \
   python -c "import arena.api.http, arena.daemon, arena.cli; print('smoke ok')"
-docker compose up -d tailscale   # first, so the arena has a namespace to join
-docker compose up -d
+docker rm -f tokenz-arena-arena-1 >/dev/null 2>&1 || true   # the old single-process service
+docker compose up -d tailscale   # first, so the others have a namespace to join
+docker compose up -d --remove-orphans
 log "deployed $(git rev-parse --short HEAD)"

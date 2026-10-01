@@ -391,6 +391,15 @@ is recorded on the site under that member's name. Copying them there is the user
 
 ## 9. Deployment on poscatgpu2
 
+- **Two processes, one image:**
+  - `engine` (`arena run`) is the only writer: scheduler, map generation, server bridge and the
+    judge workers, each game (judge run and log parsing) in its own worker process. Its full
+    API listens on 127.0.0.1:8701.
+  - `web` (`arena web`) is the website, API and MCP on 127.0.0.1:8700. It answers from a
+    read-only copy of the state that it refreshes from the data files every second, and forwards
+    writes and `/api/v1/server/*` to the engine with the caller's address. It runs no games,
+    so pages stay fast however busy the judges are.
+  - `arena serve` still runs everything in one process, for local use.
 - **Container:** one image (`Dockerfile`: Python 3.12, uv, the pinned unswbc, the arena, and
   `bcweb` from a build context). `compose.yaml` runs it next to a **Tailscale sidecar**
   (`tailscale/tailscale`, userspace networking, so no sudo and nothing installed on the

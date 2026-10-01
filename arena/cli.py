@@ -48,6 +48,67 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _engine(args: argparse.Namespace) -> int:
+    """`arena run`: the engine. The only writer: scheduler, judge worker processes, map
+    generation and the server bridge, with the full API on an internal address that the
+    website forwards writes to."""
+    import uvicorn
+
+    from arena import config
+    from arena.api.http import create_app
+    from arena.daemon import Daemon
+    from arena.state import Arena
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    cfg = config.load(Path(args.config) if args.config else None)
+    arena = Arena(cfg)
+    daemon = Daemon(arena)
+    if cfg.get("maps", "worldgen", True):
+        daemon.install_maps()
+    try:
+        from arena.server import bridge
+        bridge.install(arena, daemon)
+    except ModuleNotFoundError:
+        pass
+    daemon.start()
+    uvicorn.run(create_app(arena), host="127.0.0.1",
+                port=args.port or cfg.get("api", "engine_port", 8701), log_level="warning")
+    return 0
+
+
+def _web(args: argparse.Namespace) -> int:
+    """`arena web`: the website, API and MCP, from a read-only copy of the state refreshed
+    every second; writes go to the engine. Runs no games, so pages stay fast."""
+    import threading
+    import time
+
+    import uvicorn
+
+    from arena import config
+    from arena.api.http import create_app
+    from arena.state import Arena
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    cfg = config.load(Path(args.config) if args.config else None)
+    arena = Arena(cfg, readonly=True)
+    arena.refresh()
+
+    def follow():
+        n = 0
+        while True:
+            time.sleep(1)
+            n += 1
+            try:
+                arena.refresh(full=(n % 120 == 0))
+            except Exception:
+                logging.getLogger("arena").exception("refresh failed")
+    threading.Thread(target=follow, daemon=True, name="refresh").start()
+    engine = f"http://127.0.0.1:{cfg.get('api', 'engine_port', 8701)}"
+    uvicorn.run(create_app(arena, engine_url=engine), host=args.host or cfg.get("api", "host", "127.0.0.1"),
+                port=args.port or cfg.get("api", "port", 8700), log_level="warning")
+    return 0
+
+
 def _status(args: argparse.Namespace) -> int:
     import urllib.request
     url = args.url.rstrip("/") + "/api/v1/leaderboard"
@@ -69,11 +130,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=1592614637)
     p.add_argument("--out", default="replays")
     p.set_defaults(func=_play)
-    p = sub.add_parser("serve", help="the arena: HTTP API, website, MCP, judge workers, server bridge")
+    p = sub.add_parser("serve", help="everything in one process (local use; production runs `run` + `web`)")
     p.add_argument("--config", help="arena.toml (default: the one in this checkout, if any)")
     p.add_argument("--host")
     p.add_argument("--port", type=int)
     p.set_defaults(func=_serve)
+    p = sub.add_parser("run", help="the engine: scheduler, judge workers, bridge (internal API)")
+    p.add_argument("--config")
+    p.add_argument("--port", type=int, help="internal API port (default [api] engine_port, 8701)")
+    p.set_defaults(func=_engine)
+    p = sub.add_parser("web", help="the website, API and MCP (reads a copy; writes go to the engine)")
+    p.add_argument("--config")
+    p.add_argument("--host")
+    p.add_argument("--port", type=int)
+    p.set_defaults(func=_web)
     p = sub.add_parser("status", help="the leaderboard in the terminal")
     p.add_argument("--url", default="http://127.0.0.1:8700")
     p.set_defaults(func=_status)
