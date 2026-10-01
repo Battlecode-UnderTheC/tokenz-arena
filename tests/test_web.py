@@ -152,3 +152,27 @@ def test_json_routes_still_answer(client, arena):
     assert len(client.get("/api/v1/games", params={"map": "one"}).json()) == 2
     assert client.get("/api/v1/games/1").json()["watch_url"] == "/games/1"
     assert client.get("/api/v1/games/99").status_code == 404
+
+
+def test_lineage_views(tmp_path):
+    from arena import config, submit
+    from arena.api.http import create_app
+    from arena.state import Arena
+    import io, zipfile
+    from fastapi.testclient import TestClient
+
+    def z(tag):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as f:
+            f.writestr("bot.toml", '[project]\nlanguage = "py"\n')
+            f.writestr("main.py", tag)
+        return b.getvalue()
+    a = Arena(config.Config(raw={"maps": {"worldgen": False}}, data_dir=tmp_path / "d"))
+    root, _ = submit.accept(a, blob=z("r"), bot="base", owner="x")
+    kid, _ = submit.accept(a, blob=z("k"), bot="base", owner="x", parent=root.id)
+    c = TestClient(create_app(a))
+    bots = c.get("/lineage").text
+    assert kid.id in bots and "ancestry" in bots
+    graph = c.get("/lineage?view=graph").text
+    assert "<svg" in graph and kid.id in graph and root.id in graph
+    assert c.get("/lineage?view=tree").status_code == 200

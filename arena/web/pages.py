@@ -134,6 +134,18 @@ button { background: var(--accent); color: #fff; border-color: var(--accent); cu
   padding: 5px 12px; }
 button:disabled { opacity: .5; cursor: default; }
 button.small { padding: 1px 8px; font-size: 12px; vertical-align: 2px; }
+.chain { white-space: normal; line-height: 1.9; }
+.edge { font-size: 11px; padding: 0 4px; border-radius: 3px; margin: 0 4px 0 2px; white-space: nowrap; }
+.edge.win { background: color-mix(in srgb, var(--win) 15%, transparent); color: var(--win); }
+.edge.loss { background: color-mix(in srgb, var(--loss) 15%, transparent); color: var(--loss); }
+.edge.draw { background: color-mix(in srgb, var(--draw) 15%, transparent); color: var(--draw); }
+details.more { display: inline; } details.more summary { display: inline; cursor: pointer; color: var(--muted); }
+.graphwrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; max-height: 78vh; background: var(--soft); }
+.lgraph .gn rect { fill: var(--bg); stroke: var(--line); }
+.lgraph .gn.rank rect { stroke: var(--fg); stroke-width: 1.5; }
+.lgraph .gn.cur rect { stroke: var(--accent); stroke-width: 2.5; }
+.lgraph text { font: 12px system-ui, sans-serif; fill: var(--fg); }
+.lgraph a:hover rect { fill: var(--chip); }
 ul.tree { list-style: none; margin: 0; padding-left: 22px; border-left: 1px dashed var(--line); }
 ul.tree.root { padding-left: 0; border-left: none; }
 ul.tree li { margin: 3px 0; }
@@ -836,9 +848,142 @@ watched; its verdict and stats are below.</p>
         return layout(f"Game {g.id}", body, f"/api/v1/games/{g.id}", "/games")
 
     # ------------------------------------------------------------ maps
+    def flatten(forest) -> dict:
+        nodes = {}
+
+        def walk(n, parent):
+            nodes[n["id"]] = {**n, "parent_id": parent}
+            for c in n["children"]:
+                walk(c, n["id"])
+        for n in forest:
+            walk(n, None)
+        return nodes
+
+    def edge_html(n) -> str:
+        vp = n.get("vs_parent") or {}
+        if not (vp.get("W") or vp.get("D") or vp.get("L")):
+            return '<span class="muted">←</span>'
+        b = vp.get("beats_parent")
+        cls = "win" if b else "loss" if b is False else "draw"
+        word = "beat" if b else "lost to" if b is False else "tied"
+        noise = "" if vp.get("significant") else "?"
+        return (f'<span class="edge {cls}" title="{word} its parent {vp.get("W")}-{vp.get("D")}-{vp.get("L")}'
+                f' ({vp.get("score")}%){", within noise" if noise else ""}">← {word}{noise} '
+                f'{vp.get("W")}-{vp.get("D")}-{vp.get("L")}</span>')
+
+    def lineage_results(forest, bot: str, ranked: bool) -> str:
+        """The bots that exist now (current ranked versions and leaves), best first, each with
+        its ancestry back to the root and the verdict at every step."""
+        nodes = flatten(forest)
+        has_kids = {n["parent_id"] for n in nodes.values() if n["parent_id"]}
+        results = [n for n in nodes.values() if n["current"] or (n["id"] not in has_kids and not ranked)]
+        if bot:
+            results = [n for n in results if n["bot"] == bot]
+        cur_ = sorted((n for n in results if n["current"]),
+                      key=lambda n: -(n["elo"] if n["elo"] is not None else -1e9))
+        rest = sorted((n for n in results if not n["current"]), key=lambda n: n["created"], reverse=True)
+        results = cur_ + rest
+        rows = []
+        for n in results:
+            chain, cur, seen = [], n, set()
+            while cur and cur["id"] not in seen:
+                seen.add(cur["id"])
+                chain.append(cur)
+                cur = nodes.get(cur["parent_id"]) if cur["parent_id"] else None
+            parts = []
+            for i, x in enumerate(chain):
+                label = sub_link(arena, x["id"]) if i else f'<b>{sub_link(arena, x["id"])}</b>'
+                parts.append(label + (" " + edge_html(x) if x.get("parent_id") else ""))
+            shown = parts if len(parts) <= 6 else parts[:5] + [
+                f'<details class="more"><summary>{len(parts) - 5} more ancestors</summary>{" ".join(parts[5:])}</details>']
+            star = "★ " if n["current"] else ""
+            elo = f'{n["elo"]:.0f}' if n.get("elo") is not None else "-"
+            first = (n["note"] or "").strip().splitlines()[0][:110] if n["note"] else ""
+            rows.append([f'{star}<a class="chip" href="/bots/{q(n["bot"])}">{e(n["bot"])}</a>', elo,
+                         status_chip(n["status"]), who(n["owner"], n["agent"]),
+                         f'<td class="note"><div class="chain">{" ".join(shown)}</div>'
+                         f'<div class="tnote">{e(first)}</div></td>'])
+        bots_ = sorted(arena.bots)
+        opt = "".join(f'<option value="{e(x)}"{" selected" if x == bot else ""}>{e(x) or "any"}</option>'
+                      for x in [""] + bots_)
+        return f"""<p class="sub">The bots we have now, best first: each bot's current ranked version (★) and every
+submission nothing has been built on yet. Each row reads backwards from the bot through its
+ancestors, with how each step did against its parent ("?" = within noise).</p>
+<form class="filters" method="get" action="/lineage"><input type="hidden" name="view" value="bots">
+<label>bot<select name="bot">{opt}</select></label>
+<label>show<select name="ranked"><option value="false">ranked and unbuilt-on drafts</option>
+<option value="true"{" selected" if ranked else ""}>ranked only</option></select></label>
+<button type="submit">Show</button></form>
+{table(["bot", "elo", "status", "owner", "ancestry (newest first)"], rows, numeric={1}, empty="nothing yet")}"""
+
+    def lineage_graph(forest) -> str:
+        """A left-to-right SVG: roots on the left, newest bots on the right; edges coloured by
+        whether the child beat its parent (dashed when within noise)."""
+        nodes = flatten(forest)
+        if not nodes:
+            return '<p class="muted">nothing yet</p>'
+        W, H, GX, GY = 190, 24, 70, 8
+        pos, y_next = {}, [0]
+
+        def place(n, depth):
+            kids = sorted(n["children"], key=lambda c: c["created"])
+            for c in kids:
+                place(c, depth + 1)
+            if kids:
+                y = sum(pos[c["id"]][1] for c in kids) / len(kids)
+            else:
+                y = y_next[0]
+                y_next[0] += 1
+            pos[n["id"]] = (depth, y)
+        for n in sorted(forest, key=lambda n: n["created"]):
+            place(n, 0)
+        depth_max = max(d for d, _ in pos.values())
+        width = (depth_max + 1) * (W + GX) + 20
+        height = y_next[0] * (H + GY) + 20
+        xy = {k: (10 + d * (W + GX), 10 + y * (H + GY)) for k, (d, y) in pos.items()}
+        edges, boxes = [], []
+        for k, n in nodes.items():
+            if n["parent_id"] in xy:
+                (px, py), (cx, cy) = xy[n["parent_id"]], xy[k]
+                vp = n.get("vs_parent") or {}
+                played = vp.get("W") or vp.get("D") or vp.get("L")
+                b = vp.get("beats_parent")
+                color = ("var(--muted)" if not played else "var(--win)" if b else
+                         "var(--loss)" if b is False else "var(--draw)")
+                dash = ' stroke-dasharray="4 3"' if played and not vp.get("significant") else ""
+                x1, y1, x2, y2 = px + W, py + H / 2, cx, cy + H / 2
+                mx = (x1 + x2) / 2
+                tip = f'{n["id"]} vs parent: {vp.get("W")}-{vp.get("D")}-{vp.get("L")}' if played else "no games vs parent yet"
+                edges.append(f'<path d="M{x1:.0f},{y1:.0f} C{mx:.0f},{y1:.0f} {mx:.0f},{y2:.0f} {x2:.0f},{y2:.0f}" '
+                             f'fill="none" stroke="{color}" stroke-width="2"{dash}><title>{e(tip)}</title></path>')
+            x, y = xy[k]
+            star = "★ " if n["current"] else ""
+            elo = f' · {n["elo"]:.0f}' if n.get("elo") is not None else ""
+            cls = "gn cur" if n["current"] else "gn rank" if n["lane"] == "ranked" else "gn"
+            label = f'{star}{n["id"]}{elo}'
+            boxes.append(f'<a href="/s/{q(k)}"><g class="{cls}"><rect x="{x}" y="{y}" width="{W}" height="{H}" rx="5"/>'
+                         f'<text x="{x + 7}" y="{y + 16}">{e(label[:30])}</text>'
+                         f'<title>{e(n["id"])} ({e(n["lane"])}, {e(n["status"])}) by {e(n["owner"])}\n'
+                         f'{e((n["note"] or "")[:300])}</title></g></a>')
+        return f"""<p class="sub">Roots on the left, newest on the right. Edges: <span class="W">green</span> beat its parent,
+<span class="L">red</span> lost, <span class="D">yellow</span> tied, dashed = within noise, grey = not measured.
+★ = each bot's current ranked version; ranked versions have a bold border. Click a box to open it.</p>
+<div class="graphwrap"><svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" class="lgraph">
+{"".join(edges)}{"".join(boxes)}</svg></div>"""
+
     @r.get("/lineage", response_class=HTMLResponse)
-    def lineage_page(bot: str = "", root: str = "", hide_rejected: bool = True, drafts: str = "all"):
+    def lineage_page(view: str = "bots", bot: str = "", root: str = "", hide_rejected: bool = True,
+                     drafts: str = "all", ranked: bool = False):
         forest = http.lineage(arena, root or None, bot or None, hide_rejected)
+        tabs = "".join(f'<a class="{"on" if view == k else ""}" href="/lineage?view={k}">{t}</a>'
+                       for k, t in (("bots", "Bots (results first)"), ("graph", "Graph"),
+                                    ("tree", "Tree (from the roots)")))
+        tabs = f'<div class="tabs">{tabs}</div>'
+        if view == "graph":
+            return layout("Lineage", f"<h1>Lineage</h1>{tabs}" + lineage_graph(forest), "/api/v1/lineage", "/lineage")
+        if view != "tree":
+            return layout("Lineage", f"<h1>Lineage</h1>{tabs}" + lineage_results(forest, bot, ranked),
+                          "/api/v1/lineage", "/lineage")
 
         def keep(n) -> bool:      # "promoted": only ranked nodes, but keep paths to them
             return drafts != "promoted" or n["lane"] == "ranked" or any(keep(c) for c in n["children"])
@@ -874,11 +1019,12 @@ watched; its verdict and stats are below.</p>
         bots_ = sorted(arena.bots)
         opt = lambda vals, cur: "".join(f'<option value="{e(x)}"{" selected" if x == cur else ""}>{e(x) or "any"}</option>'
                                         for x in [""] + list(vals))
-        body = f"""<h1>Lineage</h1>
+        body = f"""<h1>Lineage</h1>{tabs}
 <p class="sub">Every submission under the one it was built on (its <code>parent</code>), across bots.
 Each line shows its verdict against its parent; ★ marks each bot's current ranked version. Lines
 that keep beating their parents are where to build next.</p>
 <form class="filters" method="get" action="/lineage">
+<input type="hidden" name="view" value="tree">
 <label>bot<select name="bot">{opt(bots_, bot)}</select></label>
 <label>show<select name="drafts"><option value="all"{" selected" if drafts == "all" else ""}>all submissions</option>
 <option value="promoted"{" selected" if drafts == "promoted" else ""}>ranked only (and their ancestors)</option></select></label>
