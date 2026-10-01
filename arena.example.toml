@@ -32,8 +32,14 @@ port = 8700
 [server]
 url = "https://game.battlecode.au"
 key_file = "~/.config/tokenz-arena/unswbc-key"   # one member's key, mode 600, outside data_dir
+                            # (a bare key, or the toolkit's ~/.unswbc/keys.json, which is also
+                            # the fallback when this file is missing)
 auto_submit = true
 min_hours = 4               # between uploads
-head_to_head_min = 0.55     # candidate vs live bot, over at least 60 games
+head_to_head_min = 0.55     # candidate vs live bot...
+head_to_head_games = 60     # ...over at least this many games
 cpu_p99_max = 70_000_000    # points per turn (cap is 100M)
-poll_seconds = 60
+poll_seconds = 60           # how often new battles are downloaded
+download_limit = 20         # how many recent battles each poll looks at
+download_per_poll = 3       # new battles imported per poll (5 games each, ~11 requests)
+gate_seconds = 300          # how often the champion gate is evaluated
