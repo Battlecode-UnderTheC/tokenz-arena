@@ -476,9 +476,11 @@ class Bridge:
                   candidate=rc or None, live=rl or None)
         else:
             lo, hi = rc["elo"] - (rc.get("err") or 1e9), rl["elo"] + (rl.get("err") or 1e9)
-            check("rating", lo > hi, f"#1 at {rc['elo']}±{rc.get('err')}; lower bound {lo:.0f} vs the "
-                  f"live bot's upper bound {hi:.0f} ({rl['elo']}±{rl.get('err')})",
-                  candidate=rc, live=rl)
+            check("rating", lo > hi,
+                  f"arena ratings (not the server's): candidate {cand} {rc['elo']:.0f} ± {rc.get('err') or 0:.0f}, "
+                  f"our live server version v{live_ver} is arena submission {live} at "
+                  f"{rl['elo']:.0f} ± {rl.get('err') or 0:.0f}; needs the candidate's low end ({lo:.0f}) above "
+                  f"the live bot's high end ({hi:.0f})", candidate=rc, live=rl)
         with a.lock:
             games = [g for g in a.games_of(cand) if g.a != g.b and g.lane != "server"]
         if live_known:

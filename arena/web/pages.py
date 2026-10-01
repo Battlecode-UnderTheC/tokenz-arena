@@ -135,6 +135,20 @@ button { background: var(--accent); color: #fff; border-color: var(--accent); cu
 button:disabled { opacity: .5; cursor: default; }
 button.small { padding: 1px 8px; font-size: 12px; vertical-align: 2px; }
 .chain { white-space: normal; line-height: 1.9; }
+ul.ltree { list-style: none; margin: 0; padding-left: 26px; border-left: 2px solid var(--line); }
+ul.ltree.root { padding-left: 0; border-left: none; }
+ul.ltree li { margin: 6px 0; }
+.lrow { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+.lrow .line { font-weight: 650; font-size: 14px; }
+.vchips { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.vchip { display: inline-block; min-width: 22px; text-align: center; padding: 0 6px; border-radius: 4px;
+  font-size: 12px; line-height: 20px; background: var(--chip); color: var(--fg); border: 1px solid transparent; }
+.vchip.W { background: color-mix(in srgb, var(--win) 30%, transparent); }
+.vchip.L { background: color-mix(in srgb, var(--loss) 30%, transparent); }
+.vchip.D { background: color-mix(in srgb, var(--draw) 30%, transparent); }
+.vchip.noise { opacity: .55; }
+.vchip.cur { border-color: var(--accent); font-weight: 700; }
+.vchip.rej { text-decoration: line-through; opacity: .5; }
 .edge { font-size: 11px; padding: 0 4px; border-radius: 3px; margin: 0 4px 0 2px; white-space: nowrap; }
 .edge.win { background: color-mix(in srgb, var(--win) 15%, transparent); color: var(--win); }
 .edge.loss { background: color-mix(in srgb, var(--loss) 15%, transparent); color: var(--loss); }
@@ -871,6 +885,80 @@ watched; its verdict and stats are below.</p>
                 f' ({vp.get("score")}%){", within noise" if noise else ""}">← {word}{noise} '
                 f'{vp.get("W")}-{vp.get("D")}-{vp.get("L")}</span>')
 
+    def vkey(sid: str):
+        m = re.search(r"(\d+)([a-z]*)$", sid)
+        return (int(m.group(1)), m.group(2)) if m else (0, sid)
+
+    def lineage_lines(forest) -> str:
+        """The family as a tree of lines (bots): each line one row with its versions in order,
+        each coloured by how it did against its parent; children lines are the ones that
+        branched off it. Lines with nothing current and no recent work fold away."""
+        nodes = flatten(forest)
+        lines: dict[str, list] = {}
+        for n in nodes.values():
+            lines.setdefault(n["bot"], []).append(n)
+        for v in lines.values():
+            v.sort(key=lambda n: (vkey(n["id"]), n["created"]))
+        parent_line: dict[str, tuple] = {}          # line -> (parent line, parent submission)
+        for name, v in lines.items():
+            for n in v:
+                p = nodes.get(n["parent_id"]) if n["parent_id"] else None
+                if p and p["bot"] != name:
+                    parent_line.setdefault(name, (p["bot"], p["id"]))
+        kids: dict[str | None, list] = {}
+        for name in lines:
+            kids.setdefault(parent_line.get(name, (None,))[0], []).append(name)
+        latest = {name: max(n["created"] for n in v) for name, v in lines.items()}
+
+        def chip(n) -> str:
+            vp = n.get("vs_parent") or {}
+            played = vp.get("W") or vp.get("D") or vp.get("L")
+            b = vp.get("beats_parent")
+            cls = "" if not played else "W" if b else "L" if b is False else "D"
+            noise = "" if not played or vp.get("significant") else " noise"
+            tip = (f'{n["id"]} ({n["lane"]}, {n["status"]})'
+                   + (f' vs parent {vp.get("W")}-{vp.get("D")}-{vp.get("L")}' if played else "")
+                   + (f' · elo {n["elo"]:.0f}' if n.get("elo") is not None else ""))
+            label = ("★ " if n["current"] else "") + re.sub(rf'^{re.escape(n["bot"])}-?', "", n["id"])
+            return (f'<a class="vchip {cls}{noise}{" cur" if n["current"] else ""}'
+                    f'{" rej" if n["status"] == "rejected" else ""}" href="/s/{q(n["id"])}" '
+                    f'title="{e(tip)}">{e(label or n["id"])}</a>')
+
+        def row(name: str, depth: int) -> str:
+            v = lines[name]
+            cur = [n for n in v if n["current"]]
+            best = max((n["elo"] for n in v if n.get("elo") is not None), default=None)
+            chips = [chip(n) for n in v]
+            if len(chips) > 14:
+                chips = [f'<details class="more"><summary>{len(chips) - 12} earlier</summary>'
+                         f'{"".join(chips[:-12])}</details>'] + chips[-12:]
+            origin = parent_line.get(name)
+            frm = (f'<span class="muted">from {sub_link(arena, origin[1])}</span>' if origin else "")
+            head = (f'<a class="line" href="/bots/{q(name)}">{e(name)}</a> '
+                    f'<span class="muted">{len(v)} version{"s" if len(v) != 1 else ""}'
+                    + (f' · ★ {e(cur[0]["id"])} elo {cur[0]["elo"]:.0f}' if cur and cur[0].get("elo") is not None else
+                       f' · ★ {e(cur[0]["id"])}' if cur else "")
+                    + (f' · best elo {best:.0f}' if best is not None and not cur else "")
+                    + f' · {e(v[-1]["owner"])}{" / " + e(v[-1]["agent"]) if v[-1].get("agent") else ""}'
+                    + '</span>')
+            sub = "".join(row(k, depth + 1) for k in sorted(kids.get(name, []), key=lambda k: latest[k], reverse=True))
+            return (f'<li><div class="lrow">{head} {frm}<div class="vchips">{"".join(chips)}</div></div>'
+                    + (f'<ul class="ltree">{sub}</ul>' if sub else "") + '</li>')
+
+        def active(name: str) -> bool:
+            return any(n["current"] for n in lines[name]) or any(active(k) for k in kids.get(name, []))
+        roots = sorted(kids.get(None, []), key=lambda k: latest[k], reverse=True)
+        live = [k for k in roots if active(k)]
+        old = [k for k in roots if not active(k)]
+        body = "".join(row(k, 0) for k in live)
+        return f"""<p class="sub">Each row is a line (a bot), with its versions in order. Colours show how each version did
+against its parent (<span class="W">beat</span>, <span class="L">lost</span>, <span class="D">tied</span>,
+faded = within noise, grey = not measured); ★ marks the line's current ranked version. A line
+nested under another branched off it ("from …"). Hover a version for its numbers; click to open it.</p>
+<ul class="ltree root">{body or '<li class="muted">no line has a ranked version yet</li>'}</ul>
+{f"""<details><summary class="muted">{len(old)} older lines with no ranked version</summary>
+<ul class="ltree root">{"".join(row(k, 0) for k in old)}</ul></details>""" if old else ""}"""
+
     def lineage_results(forest, bot: str, ranked: bool) -> str:
         """The bots that exist now (current ranked versions and leaves), best first, each with
         its ancestry back to the root and the verdict at every step."""
@@ -985,13 +1073,15 @@ history). Each line runs straight across, newest line on top; side branches drop
 """
 
     @r.get("/lineage", response_class=HTMLResponse)
-    def lineage_page(view: str = "bots", bot: str = "", root: str = "", hide_rejected: bool = True,
+    def lineage_page(view: str = "lines", bot: str = "", root: str = "", hide_rejected: bool = True,
                      drafts: str = "all", ranked: bool = False):
         forest = http.lineage(arena, root or None, bot or None, hide_rejected)
         tabs = "".join(f'<a class="{"on" if view == k else ""}" href="/lineage?view={k}">{t}</a>'
-                       for k, t in (("bots", "Bots (results first)"), ("graph", "Graph"),
-                                    ("tree", "Tree (from the roots)")))
+                       for k, t in (("lines", "Lines"), ("bots", "Every version (results first)"),
+                                    ("graph", "Graph"), ("tree", "Tree (from the roots)")))
         tabs = f'<div class="tabs">{tabs}</div>'
+        if view == "lines":
+            return layout("Lineage", f"<h1>Lineage</h1>{tabs}" + lineage_lines(forest), "/api/v1/lineage", "/lineage")
         if view == "graph":
             return layout("Lineage", f"<h1>Lineage</h1>{tabs}" + lineage_graph(forest), "/api/v1/lineage", "/lineage")
         if view != "tree":

@@ -171,7 +171,9 @@ def test_lineage_views(tmp_path):
     root, _ = submit.accept(a, blob=z("r"), bot="base", owner="x")
     kid, _ = submit.accept(a, blob=z("k"), bot="base", owner="x", parent=root.id)
     c = TestClient(create_app(a))
-    bots = c.get("/lineage").text
+    lines = c.get("/lineage").text                       # default: the Lines view
+    assert "vchip" in lines and kid.id in lines and "base" in lines
+    bots = c.get("/lineage?view=bots").text
     assert kid.id in bots and "ancestry" in bots
     graph = c.get("/lineage?view=graph").text
     assert "<svg" in graph and kid.id in graph and root.id in graph
