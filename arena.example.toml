@@ -30,8 +30,10 @@ host = "100.0.0.0"          # the tailnet address
 port = 8700
 
 [server]
-mode = "approve"            # auto | approve | off
-min_hours = 4               # between submissions
-quota_share = 30            # of the site's 60 games an hour; the rest is for teammates
+url = "https://game.battlecode.au"
+key_file = "~/.config/tokenz-arena/unswbc-key"   # one member's key, mode 600, outside data_dir
+auto_submit = true
+min_hours = 4               # between uploads
 head_to_head_min = 0.55     # candidate vs live bot, over at least 60 games
 cpu_p99_max = 70_000_000    # points per turn (cap is 100M)
+poll_seconds = 60

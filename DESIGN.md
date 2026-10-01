@@ -94,9 +94,9 @@ POST zip --> api --> checks --> submissions/<id>/{meta.json, source.zip}
 | `arena/daemon.py` | The background part of `arena serve`: schedule, play, rate. |
 | `arena/api/http.py` | The HTTP API (the one write is submitting) and `/llms.txt`. |
 | `arena/api/mcp.py` | The same as MCP tools. |
-| `arena/server/bridge.py` | The server bridge: champion gate, submit, quota plan, battle polling, import (section 8). |
-| `arena/server/bcweb.py` | The competition website client, from syeyoung-tokens `scripts/server/`. |
-| `arena/cli.py` | `arena serve`, `arena status`, `arena play`, `arena token`, `arena server <status\|pause\|resume\|approve>`. |
+| `arena/server/proxy.py` | `/unswbc/api/v1/*`: the toolkit-compatible API, with uploads as arena submissions, cached pass-through for the rest, and activate refused. |
+| `arena/server/bridge.py` | Auto-submit behind the champion gate, auto-download of battles and replays, the server suite (section 8). |
+| `arena/cli.py` | `arena serve`, `arena status`, `arena play`, `arena token`, `arena server <status\|pause\|resume>`. |
 
 ## 1. Submitting
 
@@ -106,10 +106,15 @@ POST /api/v1/submissions          Authorization: Bearer <teammate token>
              bot = "swarm"        the bot's name; its submissions form a line
              parent = "<id>"      optional: the submission this builds on (anyone's)
              note = "..."         the hypothesis and what changed (markdown)
+             source = "<url>"     optional: where the code lives, e.g. a GitHub commit or tag URL
              lane = "draft"       draft (default) | ranked
 -> 202 {"id": "swarm-7", "status": "checking", "url": "/api/v1/submissions/swarm-7"}
 ```
 
+- **Source link:** optional provenance, shown on the submission's page with the note. The
+  zip is still what's judged and stored, so the arena never fetches the link. Prefer a commit
+  or tag URL (`https://github.com/<org>/<repo>/commit/<sha>`, `/tree/<tag>`). A branch moves,
+  and would stop matching the zip, so a branch URL is flagged on the page as "moving".
 - **Names:** a bot belongs to the teammate who first submitted it. Submission ids are
   `<bot>-<n>`.
 - **Lanes:**
@@ -203,7 +208,8 @@ page for agents.
 | `GET /api/v1/stats/maps` | Per map: games, how they end, first-seat advantage. |
 | `GET /api/v1/queue` | What's playing and waiting, by lane and owner. |
 | `GET /api/v1/server` | The server bridge's state (section 8). |
-| `POST /api/v1/server/approve`, `/pause`, `/resume` | Teammate token. Approve the candidate, or pause the bridge. |
+| `POST /api/v1/server/pause`, `/resume` | Teammate token. Pause or resume auto-submit. |
+| `/unswbc/api/v1/*` | The competition server's API, proxied (section 8). Point `UNSWBC_SERVER` here. |
 | `GET /health` | Daemon heartbeat, workers, unswbc version, disk free. |
 | `GET /llms.txt` | A plain-text guide to all of the above. |
 
@@ -240,80 +246,86 @@ checked in headless Chrome on a real replay: board, playback, timeline and the v
 per-team stats (deaths by kind, splits, sprints). The same bundle also has a map view
 (`data-view="map"`) for the map previews.
 
-## 8. The server bridge (competition server)
+## 8. The server bridge: a proxy to the competition server
 
-The competition server plays only the team's one **active** submission, and its battle
-quota (60 games an hour) is shared by the whole team. So someone has to decide which
-arena bot is live, spend the quota where it teaches the most, and bring the results back.
-The bridge does that, inside the arena process, as deterministic code (not an LLM). It
-reuses `bcweb.py` from syeyoung-tokens for the website (login, battles, replays, challenges,
-quota) and `unswbc submit` for uploads.
+The competition server has a documented JSON API (`https://game.battlecode.au/api/v1`,
+`Authorization: Bearer <member key>`, 120 requests a minute per key). The `unswbc` toolkit
+talks to whatever server `UNSWBC_SERVER` names. So the arena serves that same API at
+`/unswbc/api/v1/*` and is, to teammates, just the competition server with an arena in front.
+Three behaviours:
 
-**1. Pick the champion.** A ranked submission becomes the *candidate* when all of these hold:
-- it's #1 on the arena leaderboard, and its rating's lower bound is above the live bot's
-  upper bound;
-- it beats the live bot head-to-head (at least 55% over at least 60 games, both seats);
-- it does at least as well as the live bot on the holdout maps;
-- it has no errors and no timeouts, and its CPU p99 is under 70M points (30% headroom on
-  the 100M cap);
-- it does at least as well as the live bot on the **server suite** (below). This is the
-  automatic form of the v9 lesson: local wins didn't survive the server's maps, so the
-  server's own maps and seeds are part of the gate.
+**1. Proxy.** Requests the arena doesn't handle itself are forwarded to the real server
+with the team's key. The teammate's arena token comes in, the team key goes out, and the
+key never leaves poscatgpu2.
+- **Reads** (`/me`, `/team`, `/submissions`, `/battles`, `/leaderboard`, `/ratings`,
+  `/teams`, `/tournaments`, `/maps`, `/queue`) are cached: leaderboard and ratings for 60 s,
+  battles for 15 s, finished battles and replays forever. One key serves the whole team,
+  so the cache is what keeps dozens of agents under 120 requests a minute (30 for
+  leaderboard and ratings). On a 429 the proxy serves the cached copy, marked stale.
+- **Challenges** (`POST /battles`) pass through. The site's 60-games-an-hour limit is the
+  team's, and the proxy reports what's left in a response header.
+- **Activate** (`POST /submissions/:id/activate`) is refused through the proxy. Only the
+  bridge changes the live bot.
+- **Uploads** (`POST /submissions`) aren't forwarded: they're arena submissions (below).
 
-**2. Submit.** At most once every `min_hours` (default 4), and never while a battle the
-bridge started is still running. It runs `unswbc submit <dir> -n <arena id> -d <note>`
-and records which server version is which arena submission. Every submission, and every
-candidate it held back with the failed condition, goes in `server/log.jsonl` and on the
-website. `[server] mode`:
-- `auto`: submit when the gate passes.
-- `approve` (the default): the website shows the candidate and its evidence, and a teammate
-  clicks approve with their token.
-- `off`: never submit.
+**2. Submit to the arena with the toolkit.** For a teammate's agent, submitting is:
 
-Any teammate can pause it from the website.
+```sh
+export UNSWBC_SERVER=http://<arena>.<tailnet>.ts.net:8700/unswbc
+unswbc auth set <arena token>
+unswbc submit mybot -n swarm \
+  -d "parent=swarm-6; source=https://github.com/<org>/<repo>/commit/<sha>; lunge at enemy heads"
+```
 
-**3. Spend the quota.** The bridge uses at most `quota_share` of the hourly allowance
-(default 30 of 60), leaving the rest for teammates by hand. Its plan, in order:
-- after a new submission: unranked battles on every map in play against 3 to 5 teams near our
-  rating, as evidence that the new bot holds up;
-- ranked battles against the teams just above us, to climb;
-- when idle: re-challenge teams we lost to most recently.
+The toolkit's upload (fields `name`, `language`, `description`, `zip`) becomes an arena
+submission:
+- `name` is the bot;
+- `description` is the note. Leading `key=value;` pairs set fields: `parent=<id>;` and
+  `source=<url>;`;
+- the reply has the toolkit's shape (`version`, `status`), so the toolkit prints it as usual.
 
-It checks `quota` before each request and never retries a refused one.
+`unswbc run` stays local, and nothing else changes for the teammate. The arena's own
+`POST /api/v1/submissions` (section 1) does the same thing for scripts and MCP.
 
-**4. Bring results back.** It polls our battles (including ones the site's autoscrim or
-other teams start) and fetches every finished game's replay. Each game becomes an arena
-game with `suite = 'server'`:
-- our seat holds the arena submission that was live;
-- the other seat holds an external bot `server:<team name>`, which is never scheduled
-  locally.
+**3. Auto-submit and auto-download.**
+- **Auto-submit.** When an arena submission passes the champion gate, the bridge uploads it
+  to the real server (`POST /submissions`, named after its arena id, its note as the
+  description) and activates it. The gate:
+  - #1 on the arena leaderboard, with its rating's lower bound above the live bot's upper
+    bound;
+  - at least 55% head-to-head against the live bot over at least 60 games;
+  - no worse on the holdout maps and on the server suite;
+  - no errors, CPU p99 under 70M points.
 
-Server replays open in the same browser viewer, and their stats come from the same
-extraction as local games.
+  It submits at most once every `min_hours` (default 4), well inside the site's 12 uploads
+  an hour. Every upload, and every candidate held back with the failed condition, is
+  logged. A teammate can pause it from the website.
+- **Auto-download.** It polls `GET /battles` once a minute. For every finished game it
+  downloads the replay (following the signed redirect without sending the key on), and
+  keeps the battle's `log` (why a game crashed or timed out). Each game becomes an arena
+  game with `suite = 'server'`:
+  - our seat holds the arena submission that was live;
+  - the other seat holds the external bot `server:<team name>`;
+  - every server game opens in the browser viewer and gets the same stats as local games.
+- **The server suite.** Every map and seed seen in a server game joins a `server` map suite.
+  Map text comes from `GET /maps`, or from the replay for maps no longer in play. The champion
+  gate plays candidates there, so a bot that only wins on our maps doesn't go live (the v9
+  lesson).
 
-**5. The server suite.** Every map and seed seen in server games joins a `server` map
-suite. Maps the web login can't download are rebuilt from the replay's map text, as
-`bcweb.py tfetch` does. The arena replays the candidate and the live bot on these maps
-against our own top bots, so "does it still eat and survive where the server sends us" is
-measured before submitting, not discovered after.
-
-**6. Expose it.** `/server` on the website and `GET /api/v1/server` (and MCP
-`server_status`) show:
+**Exposed** on `/server` (website), `GET /api/v1/server` and MCP `server_status`:
 - the live bot and its arena id;
-- our server rank and rating over time;
-- the latest battles, with per-map results and "watch" links;
-- the quota left;
-- the candidate and why it is or isn't being submitted;
-- the submission history.
+- rank and rating over time;
+- battles with per-map results and "watch" links;
+- quota left;
+- the current candidate and why it is or isn't going up;
+- the upload history.
 
-Teammates' agents read the same thing, so a loss on the server is visible to every loop
-within minutes.
-
-**Secrets.** The bridge needs the team's toolkit key (`~/.unswbc/keys.json`) and the website
-login (`~/.unswbc-web/credentials`) on poscatgpu2, both mode 600 and owned by the arena's
-user. They're read only by the bridge, never logged, never served, and never written into
-the data directory. Copying them to poscatgpu2 is a step for the user, not for the
-arena's code.
+**Secrets.** The bridge needs one member's key from the site's Team page (today
+`~/.unswbc/keys.json` on the Mac) on poscatgpu2, mode 600, outside the data directory.
+It's read only by the bridge, never logged or served. Everything done through it is
+recorded on the site under that member's name. Copying it there is the user's step. The
+web login and `bcweb.py` are no longer needed: the key API covers battles, replays,
+challenges and tournaments.
 
 ## 9. Deployment on poscatgpu2
 
@@ -322,7 +334,9 @@ arena's code.
   `loginctl enable-linger` so it survives logout.
 - State lives in `~/tokenz-arena-data/`: `submissions/`, `games/`, `replays/`, `work/`,
   `maps/holdout/`, `tokens.json`, `ratings.json`, `logs/`. Back it up with `rsync`.
-- Network: binds to the tailnet address, for teammates on Tailscale.
+- Network: Tailscale only. `tailscale serve` gives it an HTTPS name on the tailnet
+  (`https://poscatgpu2.<tailnet>.ts.net`). It's never exposed publicly, but tokens are still
+  needed to submit, because tailnet members aren't all trusted to change the live bot.
 
 ## Build order
 
@@ -336,8 +350,9 @@ arena's code.
 6. MCP.
 7. Deploy on poscatgpu2, tokens for teammates; seed it with our best bots.
 8. Holdout, continuous matches, retention, the remaining web pages.
-9. The server bridge: import our battles first (read-only), then the server suite, then the
-   champion gate in `approve` mode, then quota spending. Secrets go on poscatgpu2 by hand.
+9. The server bridge, in this order: the read proxy and auto-download (read-only); toolkit
+   uploads as arena submissions; the server suite; auto-submit. The key goes on poscatgpu2 by
+   hand.
 10. `docs/AGENTS.md`: the brief for teammates' agents (the loop above, with curl examples).
 
 ## Open decisions
@@ -345,6 +360,6 @@ arena's code.
 - The draft size (parent + top 3 × official maps × 2 seats = 120 games) depends on the
   measured cost of a game.
 - Should `promote` require beating the parent, or is it the owner's call?
-- The bridge's mode once it has earned trust: stay in `approve`, or switch to `auto`?
-- Its share of the 60-games-an-hour quota (default 30), given teammates also start battles by hand.
+- Should the bridge also spend quota on its own (ranked battles to climb), or leave all
+  challenges to teammates through the proxy?
 - Should our syeyoung-tokens variants enter through `make-bot.sh` exports, as one bot each?
