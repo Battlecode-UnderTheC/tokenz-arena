@@ -260,7 +260,14 @@ def map_stats(arena: Arena) -> list[dict]:
         r["ends"][end] = r["ends"].get(end, 0) + 1
     for r in rows.values():
         r["rounds_mean"] = round(r.pop("rounds") / r["games"], 1)
-    return sorted(rows.values(), key=lambda r: (r["suite"], r["map"]))
+    # current: the map is in its suite today (not a superseded official copy, an old rotating
+    # week, or a removed upload); retired maps keep their history but aren't played any more
+    from arena.maps import suite_files
+    live = {(suite, p.stem) for suite in ("official", "tournament", "server", "custom", "rotating")
+            for p in suite_files(arena.cfg, suite)}
+    for r in rows.values():
+        r["current"] = (r["suite"], r["map"]) in live
+    return sorted(rows.values(), key=lambda r: (not r["current"], r["suite"], r["map"]))
 
 
 def queue(arena: Arena) -> dict:

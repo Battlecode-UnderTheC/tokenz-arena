@@ -871,19 +871,20 @@ that keep beating their parents are where to build next.</p>
 
     @r.get("/maps", response_class=HTMLResponse)
     def maps_page(request: Request):
-        rows = []
-        for m in http.map_stats(arena):
+        rows, retired = [], []
+        stats = http.map_stats(arena)
+        for m in stats:
             n = m["games"]
             decided = m["seat_a_wins"] + m["seat_b_wins"]
             adv = f'{100 * m["seat_a_wins"] / decided:.0f}%' if decided else "-"
             ends = ", ".join(f"{e(k)} {v}" for k, v in sorted(m["ends"].items(), key=lambda x: -x[1]))
             preview = (f'<a href="/maps/{q(m["suite"])}/{q(m["map"])}">preview</a>'
                        if _map_file(arena, m["suite"], m["map"]) else "")
-            rows.append([e(m["suite"]), e(m["map"]), str(n), str(m["seat_a_wins"]),
+            (rows if m["current"] else retired).append([e(m["suite"]), e(m["map"]), str(n), str(m["seat_a_wins"]),
                          str(m["seat_b_wins"]), str(m["draws"]), adv, str(m["rounds_mean"]),
                          f'<td class="note">{ends}</td>', preview,
                          f'<a href="/games?map={q(m["map"])}&suite={q(m["suite"])}">games</a>'])
-        played = {(m["suite"], m["map"]) for m in http.map_stats(arena)}
+        played = {(m["suite"], m["map"]) for m in stats}
         unplayed = []
         from arena.maps import suite_files
         for suite in ("server", "official", "tournament", "custom", "rotating"):
@@ -891,12 +892,18 @@ that keep beating their parents are where to build next.</p>
                 if (suite, p.stem) not in played:
                     unplayed.append(f'<a href="/maps/{q(suite)}/{q(p.stem)}">{e(suite)}/{e(p.stem)}</a>')
         body = f"""<h1>Maps</h1>
-<p class="sub">Every game except checks and holdout. "A wins %" is seat A's share of decided
-games: the first-seat advantage.</p>
+<p class="sub">The maps the arena plays now, with every game on them so far (checks and holdout
+excluded). "A wins %" is seat A's share of decided games: the first-seat advantage. Maps that
+were replaced or removed are under "Retired maps" at the bottom.</p>
 {table(["suite", "map", "games", "A wins", "B wins", "draws", "A wins %", "rounds mean", "how games end", "", ""],
        rows, numeric={2, 3, 4, 5, 6, 7}, empty="no games yet")}
 {f'<h2>Not played yet</h2><p>{" · ".join(unplayed)}</p>' if unplayed else ''}
-{uploads_html(request)}"""
+{uploads_html(request)}
+{f"""<details><summary><h2 style="display:inline">Retired maps <span class="sub">{len(retired)} maps no longer
+played: official copies the server's own versions replaced, past rotating weeks, removed uploads.
+Their games stay in the record.</span></h2></summary>
+{table(["suite", "map", "games", "A wins", "B wins", "draws", "A wins %", "rounds mean", "how games end", "", ""],
+       retired, numeric={2, 3, 4, 5, 6, 7})}</details>""" if retired else ""}"""
         return layout("Maps", body, ["/api/v1/stats/maps", "/api/v1/maps"], "/maps")
 
     def uploads_html(request: Request) -> str:
