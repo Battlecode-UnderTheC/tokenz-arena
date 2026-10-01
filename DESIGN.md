@@ -172,8 +172,8 @@ hides rock-paper-scissors.
   max), and the dragon count and total length per side every 10 rounds.
 - **Per submission (computed):** win % by opponent and by map, death profile, CPU headroom
   against the 100M cap, child vs parent, rating history.
-- **Replays:** every game's `.replay` file, downloadable, which opens in the unswbc VS Code
-  viewer. Kept for current submissions, drafts from the last 3 days and everything from the
+- **Replays:** every game's `.replay` file, downloadable, and watchable in the browser (see
+  section 7). Kept for current submissions, drafts from the last 3 days and everything from the
   last 14 days. Verdicts and stats are kept forever.
 - **Sources:** every submission's zip, kept forever (they're small).
 - **Disk:** poscatgpu2's root volume is 94% full (123 GB free). Retention plus a hard cap
@@ -205,10 +205,37 @@ page for agents.
 
 **MCP** (`/mcp`, streamable HTTP) wraps the same endpoints as tools: `submit` (takes a
 directory path or base64 zip), `submission`, `wait`, `promote`, `report`, `leaderboard`,
-`ideas`, `games`, `game`, `map_stats`, `queue`. A small HTML page for people (leaderboard,
-bot pages, replay links) comes after the JSON.
+`ideas`, `games`, `game`, `map_stats`, `queue`.
 
-## 7. Deployment on poscatgpu2
+## 7. The website (for people)
+
+Server-rendered HTML from the same process and the same in-memory state as the JSON API.
+No frontend build, no JavaScript framework. Each page has a JSON twin, so a person and an
+agent always see the same numbers.
+
+| Page | Shows |
+|---|---|
+| `/` | Leaderboard: rating ±, win %, games, owner, status. A "recent" strip of new submissions and their draft verdicts. |
+| `/bots/{bot}` | The bot's line: submissions in order with notes and verdicts, a lineage tree across bots, a head-to-head grid, rating over time. |
+| `/s/{id}` | One submission: its note, its checks, the draft verdict vs its parent and the top bots, the report (worst maps, death profile, CPU), source download, and a list of games, each with a "watch" link. |
+| `/games/{id}` | The replay viewer, full window, with the game's verdict and seats above it. |
+| `/games?…` | Filterable game list (bot, opponent, map, result). |
+| `/maps` | Per-map stats, with a preview of each map. |
+| `/ideas` | Searchable notes with outcomes: the experiment log. |
+| `/submit` | Upload form (token, zip, bot, parent, note) for people who aren't using curl. |
+| `/queue` | What's playing now and what's waiting. |
+
+**Replay viewer in the browser.** The toolkit ships its VS Code replay viewer
+(`unswbc/replay-viewer.vsix`). The webview inside it is a self-contained bundle whose only
+tie to VS Code is `acquireVsCodeApi().postMessage({type: "ready"})`, answered with
+`{type: "open", name, url}`. `arena/web/viewer.py` serves it in a plain page that stubs that
+API and sets the theme variables. It's extracted from the installed toolkit on start, never
+copied into this repo, so it always matches the pinned judge version. It already works,
+checked in headless Chrome on a real replay: board, playback, timeline and the viewer's own
+per-team stats (deaths by kind, splits, sprints). The same bundle also has a map view
+(`data-view="map"`) for the map previews.
+
+## 8. Deployment on poscatgpu2
 
 - Python 3.12 with `uv`. unswbc goes in the project venv at the competition's version.
 - One systemd user service (`deploy/arena.service`, running `arena serve`). Run
@@ -225,9 +252,10 @@ bot pages, replay links) comes after the JSON.
 3. Scheduler and worker pool: drafts and placement; `?wait=`.
 4. Ratings, reports, leaderboard, `arena status`.
 5. Replay and source downloads, games, `/ideas`, `/llms.txt`.
+5b. The website: leaderboard, submission, game (with the viewer) and submit pages first.
 6. MCP.
 7. Deploy on poscatgpu2, tokens for teammates; seed it with our best bots.
-8. Holdout, continuous matches, server import, retention, the HTML page.
+8. Holdout, continuous matches, server import, retention, the remaining web pages.
 9. `docs/AGENTS.md`: the brief for teammates' agents (the loop above, with curl examples).
 
 ## Open decisions

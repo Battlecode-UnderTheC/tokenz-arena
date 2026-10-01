@@ -16,6 +16,7 @@ order in `DESIGN.md`.
 | `arena/store.py` | JSON files, one per record, atomic writes. No database. |
 | `arena/submit.py`, `scheduler.py`, `stats.py`, `rating.py`, `report.py`, `daemon.py` | Submission checks, scheduling, stats, ratings, reports, the worker loop (stubs). |
 | `arena/api/http.py`, `arena/api/mcp.py` | The HTTP API and MCP tools (stubs). |
+| `arena/web/viewer.py` | The toolkit's replay viewer in a plain browser page (working). |
 | `arena/cli.py` | The `arena` command. |
 | `maps/official/` | The official maps. The holdout pool lives only in the data directory. |
 | `deploy/arena.service` | The systemd user service for poscatgpu2. |
