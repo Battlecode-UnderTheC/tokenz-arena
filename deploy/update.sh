@@ -22,7 +22,8 @@ log "deploying $(git log -1 --format='%h %s')"
 mkdir -p "$ARENA_DATA" "$ARENA_CACHE" "$ARENA_SECRETS"
 [ -f "$ARENA_DATA/arena.toml" ] || cp deploy/arena.poscatgpu2.toml "$ARENA_DATA/arena.toml"
 docker compose build -q arena
-docker compose run --rm --no-deps --entrypoint python arena \
-  -c "import arena.api.http, arena.daemon, arena.cli; print('smoke ok')"
+# Smoke test on the bare image (no network: the compose service shares the sidecar's).
+docker run --rm --network none tokenz-arena:latest \
+  python -c "import arena.api.http, arena.daemon, arena.cli; print('smoke ok')"
 docker compose up -d
 log "deployed $(git rev-parse --short HEAD)"
