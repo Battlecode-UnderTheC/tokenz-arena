@@ -13,9 +13,10 @@ import shutil
 from dataclasses import asdict
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from arena import report, scheduler, submit, who
+from arena.config import ROOT
 from arena.state import DONE, RATED, REJECTED, Arena, result_for, wdl
 from arena.web import viewer
 
@@ -348,7 +349,22 @@ def create_app(arena: Arena) -> FastAPI:
         g = get_game_obj(gid)
         return viewer.page(f"/api/v1/games/{gid}/replay", f"{g.a} vs {g.b} on {g.map}")
 
-    for mod, attr in (("arena.web.pages", "router"), ("arena.server.routes", "router")):
+    @app.get("/api/v1/whoami")
+    def whoami(request: Request, agent: str | None = None):
+        c = caller(request, agent)
+        return {"owner": c.owner, "name": c.name, "agent": c.agent, "tagged": c.tagged}
+
+    @app.get("/tokenz.py", response_class=PlainTextResponse)
+    def tokenz_client(request: Request):
+        """The command-line client, with this arena's address as its default."""
+        from arena.web.docs import public_url
+        src = (ROOT / "client" / "tokenz.py").read_text()
+        url = public_url(arena, request)
+        return src.replace('DEFAULT_ARENA = "https://tokenz-arena.lonk-kelvin.ts.net"',
+                           f'DEFAULT_ARENA = "{url}"', 1)
+
+    for mod, attr in (("arena.web.pages", "router"), ("arena.web.docs", "router"),
+                      ("arena.server.routes", "router")):
         try:
             m = __import__(mod, fromlist=[attr])
             app.include_router(m.make_router(arena) if hasattr(m, "make_router") else getattr(m, attr))

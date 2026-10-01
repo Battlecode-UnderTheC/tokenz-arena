@@ -26,6 +26,7 @@ holdout = [1592614637]
 # The arena is reachable only through the sidecar's `tailscale serve`, which forwards with the
 # caller's tailnet IP: trust its Tailscale-User-Login header from any address.
 trust_tailscale_headers = true
+public_url = "https://tokenz-arena.lonk-kelvin.ts.net"
 
 [server]
 key_file = "/secrets/keys.json"   # the toolkit's keys.json format (copied from the Mac)
