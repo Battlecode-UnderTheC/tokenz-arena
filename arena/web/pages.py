@@ -25,7 +25,7 @@ from arena.state import Arena, result_for
 from arena.web import viewer
 
 NAV = [("/", "Leaderboard"), ("/lineage", "Lineage"), ("/ideas", "Ideas"), ("/games", "Games"), ("/maps", "Maps"),
-       ("/queue", "Queue"), ("/server", "Server"), ("/evals", "Evals"), ("/submit", "Submit"), ("/docs", "Docs")]
+       ("/queue", "Queue"), ("/server", "Server"), ("/compare", "Compare"), ("/evals", "Evals"), ("/submit", "Submit"), ("/docs", "Docs")]
 
 
 def e(x) -> str:
@@ -702,6 +702,7 @@ document.getElementById("promote").onclick = async (ev) => {{
 <div>lane / status</div><div>{e(s.lane)} {status_chip(s.status)}</div>
 <div>parent</div><div>{sub_link(arena, s.parent, with_bot=True)}
 {'<button class="small" onclick="setParent()">change</button>' if can_edit else ''}
+{f' <a class="small" href="/compare?a={q(s.id)}&b={q(s.parent)}">compare</a>' if s.parent else ''}
 {f' <span class="muted" title="{e(", ".join(f"{h['parent'] or 'none'} (until {h['at'][:16]}, changed by {h['by']})" for h in s.parent_history))}">(was {e(s.parent_history[-1]["parent"] or "none")})</span>' if s.parent_history else ''}
 <script>
 async function setParent() {{

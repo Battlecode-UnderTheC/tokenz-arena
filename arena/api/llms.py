@@ -131,6 +131,9 @@ GET  /api/v1/evals?window=5h|12h|1d|3d|all  our metrics checked against real gam
                                             teams (the eval's accuracy, AUC and calibration per
                                             round, each metric's AUC, endings, queens)
 GET  /api/v1/evals/games/{{id}}               one of those games, with its metrics and replay
+GET  /api/v1/compare?a=X&b=Y[&map=M][&scope=all|h2h]  two bots side by side from their games'
+                                            metrics: per map, every 10 rounds, how and when their
+                                            queens die, early/mid/late game (page: /compare)
 GET  /api/v1/maps                           every public map by suite (official, tournament,
                                             server, custom = team uploads, rotating = this
                                             week's generated maps); hidden uploads only counted

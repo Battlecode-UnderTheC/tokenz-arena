@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 EVERY = 10
-FORMAT = 1
+FORMAT = 2               # 2: adds "queens" (how and when each queen died)
 
 
 @dataclass
@@ -178,6 +178,32 @@ class Ctx:
 
 # ---------------------------------------------------------------------------- computing
 
+QUEEN_CAUSES = ["hit a wall", "ran into itself", "ran into an enemy", "ran into an ally",
+                "head-on: an enemy moved into it", "head-on: lunged by an enemy",
+                "head-on: moved into an enemy", "head-on: moved into an ally", "head-on: an ally moved into it",
+                "no valid move", "other", "not recorded yet"]
+
+
+def queen_cause(reason: str, detail: str) -> str:
+    """A queen's death in words (the decoder's reason and detail; a mover's head-on is settled
+    at the end of its turn, by whether it took an enemy with it)."""
+    if reason == "wall":
+        return "hit a wall"
+    if reason == "self":
+        return "ran into itself"
+    if reason == "other_body":
+        return "ran into an ally" if detail == "into_ally" else "ran into an enemy"
+    if reason == "head_to_head":
+        if detail == "mover":
+            return "head-on"                       # settled when its turn ends
+        if detail.startswith("hit_by_enemy"):
+            return "head-on: lunged by an enemy" if detail.endswith("_lunge") else "head-on: an enemy moved into it"
+        return "head-on: an ally moved into it"
+    if reason == "no_valid_action":
+        return "no valid move"
+    return "other"
+
+
 def compute(blob: bytes, every: int = EVERY) -> dict:
     """All registered metrics for one replay (plain or gzip bytes)."""
     from arena.metrics import state as S
@@ -187,6 +213,9 @@ def compute(blob: bytes, every: int = EVERY) -> dict:
     d = S.load_bytes(blob)
     g = S.GameMap(d["map"])
     queens = {t: i for i, (t, _) in enumerate(g.dragons[:2])}
+    # how each queen died: {team: {"round", "cause", "length"}} (None if it lived)
+    queen_death: dict = {"A": None, "B": None}
+    queen_ids = {i: t for t, i in queens.items()}
     cum = {t: collections.Counter() for t in "AB"}
     past = {t: [] for t in "AB"}
     rounds: list[int] = []
@@ -228,13 +257,20 @@ def compute(blob: bytes, every: int = EVERY) -> dict:
                 cum[t]["paid"] += max(0, len(act[1]) - free)
             if info["died"] == "head_to_head":
                 # the mover's own head-to-head death: enemy-caused if it took an enemy with it
-                if any(st.team.get(k) != t for k in info["killed"]):
+                enemy = any(st.team.get(k) != t for k in info["killed"])
+                if enemy:
                     cum[t]["deaths_enemy"] += 1
                     cum[Ctx.other(t)]["kills"] += 1
                 else:
                     cum[t]["deaths_self"] += 1
+                qt = queen_ids.get(info["id"])
+                if qt and queen_death[qt] and queen_death[qt]["cause"] == "head-on":
+                    queen_death[qt]["cause"] = "head-on: moved into an enemy" if enemy else "head-on: moved into an ally"
         elif kind == "death":
             _, i, t, reason, length, detail = info
+            if i in queen_ids:
+                queen_death[queen_ids[i]] = {"round": info[0] + 1, "cause": queen_cause(reason, detail),
+                                             "length": length}
             cum[t]["deaths"] += 1
             cum[t]["lost"] += length
             if reason == "head_to_head" and detail == "mover":
@@ -257,7 +293,7 @@ def compute(blob: bytes, every: int = EVERY) -> dict:
     if last_state is not None and (not rounds or rounds[-1] != last_done):
         snapshot(last_state, last_done)
     res = d.get("result") or {}
-    return {"format": FORMAT, "versions": {m.name: m.version for m in reg.values()},
+    return {"format": FORMAT, "versions": {m.name: m.version for m in reg.values()}, "queens": queen_death,
             "every": every, "rounds": rounds, "team": team_series, "game": game_series,
             "map": {"name": g.name, "W": g.W, "H": g.H},
             "result": {"winner": res.get("winner"), "end": res.get("endReason")},

@@ -52,6 +52,16 @@ queen; they didn't predict the winner any better than whether the queen is alive
 The eval combines dragons (log), board control, longest dragon, queen alive and who leads under
 the round-500 rule, with weights fitted per round (`arena/metrics/plugins/eval.py`).
 
+## Comparing two bots
+
+`/compare?a=X&b=Y` (linked from each submission's parent, and in the top menu) puts two bots side
+by side from their games' metrics, each from its own seat: per map (score, length, how often the
+queen dies), every 10 rounds (each metric, theirs and their opponents', averaged over the games
+still running), their queens (survival by round, how they died: wall, own body, enemy or ally
+body, head-on and who moved, lunged by an enemy, no valid move; and when: early 1-150, mid
+151-350, late 351-500), and early/mid/late averages. Filter by map, or keep only the two bots'
+games against each other. JSON: `GET /api/v1/compare`.
+
 ## Adding a metric
 
 Put a function in any module under `arena/metrics/plugins/` (new files are picked up
