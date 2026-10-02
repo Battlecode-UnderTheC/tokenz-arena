@@ -93,7 +93,7 @@ def make_router(arena: Arena) -> APIRouter:
             with open(fd, "wb") as f:
                 f.write(await replay.read())
             path = Path(tmp)
-        res = {k: m.get(k) for k in ("winner", "rounds", "reason", "seconds", "stats", "error")}
+        res = {k: m.get(k) for k in ("winner", "rounds", "reason", "seconds", "stats", "error", "metrics")}
         if res["winner"] not in ("A", "B", None):
             raise HTTPException(400, "winner must be A, B or null")
         out = call(reg().result, str(m["worker"])[:64], tok, str(m["lease"]), res, path)

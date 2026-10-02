@@ -596,6 +596,39 @@ def make_router(arena: Arena) -> APIRouter:
         return layout(bot, body, f"/api/v1/bots/{q(bot)}")
 
     # ------------------------------------------------------------ one submission
+    def metrics_html(s) -> str:
+        """Each in-game metric for this submission vs its opponents, averaged over its games."""
+        from arena.metrics import views as MV
+        d = MV.submission(arena, s.id)
+        if not d["games"]:
+            return ('<h2>In-game metrics</h2><p class="muted">No metrics yet: they are computed after each '
+                    'game (and for older games in the background).</p>')
+        cols = [f"r{r}" for r in MV.SUMMARY_ROUNDS] + ["end"]
+        order = ["eval", "board_control", "log_dragons", "dragons", "total_length", "longest",
+                 "queen_alive", "queen_length", "pearls_eaten", "pearl_control", "deaths", "deaths_self",
+                 "kills", "splits"]
+        names = [k for k in order if k in d["metrics"]] + sorted(k for k in d["metrics"] if k not in order)
+        rows = []
+        for k in names:
+            m = d["metrics"][k]
+            cells = ['<b>Eval: P(win)</b>' if k == "eval" else e(m["title"])]
+            for c in cols:
+                v = m["at"].get(c)
+                if not v:
+                    cells.append('<span class="muted">-</span>')
+                    continue
+                own, opp = v["own"], v["opponents"]
+                good = {"higher": own > opp, "lower": own < opp}.get(m.get("better") or "", None)
+                if k == "eval":
+                    good = own > 0.5
+                cls = "" if good is None or own == opp else ("W" if good else "L")
+                fmt = (lambda x: f"{x:.0%}") if k == "eval" else (lambda x: f"{x:.2f}" if abs(x) < 10 else f"{x:.0f}")
+                cells.append(f'<span class="{cls}">{fmt(own)}</span> <span class="muted">vs {fmt(opp)}</span>')
+            rows.append(cells)
+        return (f'<h2>In-game metrics <span class="sub">this bot vs its opponents, averaged over {d["games"]} '
+                f'games; <a href="/docs/metrics">what they mean</a></span></h2>'
+                + table(["metric"] + cols, rows))
+
     @r.get("/s/{sid}", response_class=HTMLResponse)
     def submission_page(sid: str, request: Request):
         s = get_sub(sid)
@@ -737,6 +770,7 @@ async function saveNote() {{
 {log}
 {verdict_html}
 {rep_html}
+{metrics_html(s)}
 <h2>Games <span class="sub">{len(games)}{"+" if len(games) == 500 else ""} ·
 <a href="/games?sub={q(s.id)}">filter</a></span></h2>
 {games_table(arena, games, sid=s.id)}"""
@@ -846,6 +880,14 @@ async function saveNote() {{
   font-weight: 700; color: #000; } .gh .sa { background: #4fb3a9; } .gh .sb { background: #d18616; }
 </style>"""
         if g.replay:
+            from arena import metrics as M
+            from arena.metrics import views as MV
+            from arena.web import evalstrip
+            gm = MV.game(arena, g.id)
+            if gm and not gm.get("error") and gm.get("rounds"):
+                strip_html, strip_head = evalstrip.strip(gm, names, M.describe())
+                header += strip_html
+                head += strip_head + "<style>:root { --arena-header: 84px; }</style>"
             return HTMLResponse(viewer.page(f"/api/v1/games/{g.id}/replay",
                                             f"{names['A']} vs {names['B']} on {g.map}",
                                             header=header, head=head + f"<style>{SRC_CSS}</style>",

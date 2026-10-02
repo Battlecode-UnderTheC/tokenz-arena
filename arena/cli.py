@@ -71,8 +71,10 @@ def _engine(args: argparse.Namespace) -> int:
     except ModuleNotFoundError:
         pass
     from arena import retention, workers
+    from arena.metrics import backfill
     workers.install(arena, daemon)
     retention.install(daemon)
+    backfill.install(daemon)
     daemon.start()
     uvicorn.run(create_app(arena), host="127.0.0.1",
                 port=args.port or cfg.get("api", "engine_port", 8701), log_level="warning")
