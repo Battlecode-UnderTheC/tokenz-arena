@@ -310,6 +310,15 @@ def make_router(arena) -> APIRouter:
             raise HTTPException(400, 'send JSON: {"arena": "<submission id>"}')
         return br().link(ver, body["arena"], _caller(request))
 
+    @r.post("/upload")
+    @guarded
+    def force_upload(request: Request, body: dict = Body(...)):
+        """Upload and activate an arena submission on the competition server now, skipping the
+        auto-submit gate: {"submission": "<id>"}. Logged with who forced it and the gate's verdict."""
+        if not isinstance(body, dict) or not isinstance(body.get("submission"), str):
+            raise HTTPException(400, 'send JSON: {"submission": "<submission id>"}')
+        return br().force_upload(body["submission"], _caller(request))
+
     @r.post("/pause")
     def pause(request: Request, body: dict | None = Body(None)):
         br().pause(_caller(request), (body or {}).get("reason"))

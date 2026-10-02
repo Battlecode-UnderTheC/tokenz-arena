@@ -394,6 +394,32 @@ def source_link(url: str | None) -> str:
     return out
 
 
+def force_upload_html(default: str = "", fixed: bool = False) -> str:
+    """The "upload to the competition server now" control: skips the auto-submit gate, after a
+    confirmation. `fixed`: for one submission (its page); otherwise a box to name any."""
+    field = (f'<input type="hidden" id="fu-id" value="{e(default)}">' if fixed else
+             f'<input id="fu-id" value="{e(default)}" placeholder="submission id" size="24">')
+    return f"""<p class="force-upload">{field}
+<button id="fu-go">Upload to the competition server now</button>
+<span id="fu-msg" class="muted">skips the auto-submit gate; becomes our live bot on the server</span></p>
+<script>
+document.getElementById("fu-go").onclick = async (ev) => {{
+  const sid = document.getElementById("fu-id").value.trim(), m = document.getElementById("fu-msg");
+  if (!sid) return;
+  if (!confirm("Upload " + sid + " to the competition server and make it our live bot?\n\n"
+               + "This skips the auto-submit gate. It's logged as forced, with your name.")) return;
+  ev.target.disabled = true; m.textContent = "uploading…";
+  try {{
+    const r = await fetch("/api/v1/server/upload", {{method: "POST", headers: {{"Content-Type": "application/json"}},
+                                                      body: JSON.stringify({{submission: sid}})}});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || j.error || r.status);
+    m.textContent = "uploaded " + sid + " as server version " + j.server_version + " and activated it";
+  }} catch (err) {{ m.textContent = "failed: " + err.message; ev.target.disabled = false; }}
+}};
+</script>"""
+
+
 def table(head: list[str], rows: list[list[str]], numeric: set[int] = frozenset(),
           empty: str = "nothing yet") -> str:
     if not rows:
@@ -637,6 +663,8 @@ def make_router(arena: Arena) -> APIRouter:
         d = http.sub_json(arena, s, detail=True)
         v = d.get("verdict")
         rt = d.get("rating") or {}
+        server_upload = (force_upload_html(s.id, fixed=True)
+                         if s.status not in ("checking", "rejected", "external") else "")
         promote = ""
         if s.lane == "draft" and s.status == "done":
             promote = f"""<p><button id="promote" data-id="{e(s.id)}">Promote to ranked</button>
@@ -746,7 +774,7 @@ async function setParent() {{
         games = http.find_games(arena, sub=s.id, limit=500)
         body = f"""<h1>{e(s.id)}</h1>
 {rejected}
-<div class="grid2"><div>{info}{promote}</div>
+<div class="grid2"><div>{info}{promote}{server_upload}</div>
 <div><h2 style="margin-top:0">Note {'<button class="small" onclick="editNote()">edit</button>' if can_edit else ''}
 <a class="sub" href="/lineage?root={q(lineage_root(arena, s.id))}#{q(s.id)}">lineage</a></h2>
 <pre id="note">{e(s.note) or '<span class="muted">(no note)</span>'}</pre>
@@ -1552,7 +1580,8 @@ f.onsubmit = async (ev) => {{
                 f' · {"<b class=W>passes, will upload</b>" if cand.get("passed") else "<b class=L>held back</b>"}'
                 f' <span class="muted">(checked {when(cand.get("at"))})</span></p>'
                 + (f'<ul>{"".join(f"<li>{e(x)}</li>" for x in failed)}</ul>' if failed else "")
-                + (table(["", "check", "evidence"], check_rows) if check_rows else ""))
+                + (table(["", "check", "evidence"], check_rows) if check_rows else "")
+                + force_upload_html(cand.get("candidate") or ""))
         battles = cached["battles"]
         brows = []
         for x in battles:

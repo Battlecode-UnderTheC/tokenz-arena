@@ -581,6 +581,7 @@ class Bridge:
                 raise ServerError("the upload answered without a submission id")
         except ServerError as e:
             self.state["last_failure"] = now()
+            self.state["last_failure_error"] = str(e)
             self.record("upload_failed", submission=sid, by=by, error=str(e))
             return None
         with self.lock:
@@ -591,6 +592,26 @@ class Bridge:
         self.state["last_upload"] = now()
         self._activate(str(ver), by)
         return {"server_version": ver, "submission": sid}
+
+    def force_upload(self, sid: str, by: str) -> dict:
+        """Uploads and activates an arena submission on the competition server now, whatever the
+        auto-submit gate says (the Server and submission pages' "upload now" button). The gate's
+        latest verdict is kept with it in the log, so a forced upload is visible as one."""
+        sid = self.arena.resolve(sid)
+        s = self.arena.subs.get(sid)
+        if not s or s.status == "external":
+            raise Refused(f"no arena submission {sid!r}", 404)
+        if s.status in ("checking", "rejected"):
+            raise Refused(f"{sid} is {s.status}: only a submission that passed its check can go up", 409)
+        if not (self.arena.cfg.submissions / sid / "source.zip").is_file():
+            raise Refused(f"{sid} has no source zip", 409)
+        gate = self.state.get("candidate") or {}
+        evidence = {"forced": True, "gate_candidate": gate.get("candidate"), "gate_passed": gate.get("passed"),
+                    "gate_failed": gate.get("failed")}
+        out = self.upload(sid, by=f"{by} (forced)", evidence=evidence)
+        if out is None:
+            raise ServerError(f"upload failed: {self.state.get('last_failure_error') or 'see the server log'}")
+        return out
 
     def _activate(self, ver: str, by: str) -> bool:
         try:

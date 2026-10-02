@@ -147,6 +147,8 @@ GET  /api/v1/lineage?bot=&root=             the family forest: nodes {{id, bot, 
 GET  /api/v1/queue                          {{"workers": 6, "running": [...], "checking": [...],
                                              "waiting": {{"swarm-7": {{"games_left": 12, ...}}}}}}
 GET  /api/v1/server[/...]                   the competition server, via the arena's bridge
+POST /api/v1/server/upload {{"submission": id}}  upload and activate it on the competition server
+                                            now, skipping the auto-submit gate (logged as forced)
      (summary, /leaderboard, /battles, /battles/{{id}}, /quota, /gate, ...)
 GET  /health                                heartbeat, workers, unswbc version, disk
 GET  /api/docs                              OpenAPI UI; /api/openapi.json the schema

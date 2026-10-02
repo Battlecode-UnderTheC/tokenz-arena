@@ -484,3 +484,26 @@ def test_link_server_version_relabels_games(tmp_path, monkeypatch):
     out = b.link("14246", "gst-1", "alice")
     assert out["games_relabelled"] == 1 and arena.games[0].a == "gst-1"
     assert b.versions["14246"]["arena"] == "gst-1"
+
+
+def test_force_upload_skips_the_gate_and_is_logged(bridge, arena, fake):
+    from fastapi.testclient import TestClient
+
+    from arena.api.http import create_app
+    _champion(arena, bridge, wins=28, losses=27)            # a candidate the gate holds back
+    assert not bridge.gate()["passed"]
+    other = add(arena, "underdog")
+    fake.set("POST", "/api/v1/submissions", {"id": 901, "name": other.id, "status": "building"})
+    fake.set("POST", "/api/v1/submissions/901/activate", {"ok": True})
+    c = TestClient(create_app(arena))
+    r = c.post("/api/v1/server/upload", json={"submission": other.id})
+    assert r.status_code == 200, r.text
+    assert r.json()["server_version"] == 901 and bridge.versions["901"]["activated"]
+    up = [x for x in bridge.history({"upload"})][0]
+    assert up["submission"] == other.id and "(forced)" in up["by"] and up["evidence"]["forced"] is True
+    assert c.post("/api/v1/server/upload", json={"submission": "nope-1"}).status_code == 404
+    assert c.post("/api/v1/server/upload", json={}).status_code == 400
+    fake.set("POST", "/api/v1/submissions", {"error": "zip too large"}, status=413)
+    r = c.post("/api/v1/server/upload", json={"submission": other.id})
+    assert r.status_code >= 400 and "zip too large" in r.text
+    assert "Upload to the competition server now" in c.get(f"/s/{other.id}").text
