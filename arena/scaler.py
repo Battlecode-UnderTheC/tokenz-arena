@@ -143,7 +143,7 @@ class Scaler:
         # the worker's own dead-man switch on the rented machine (arena/worker.py self_destroy)
         self.worker_idle_s = float(g("worker_idle_minutes", 30)) * 60
         self.worker_orphan_minutes = float(g("worker_orphan_minutes", 20))
-        self.image = g("image", "registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena:latest")
+        self.image = g("image", "registry.syeyoung.dev/undertehc/tokenz-arena:latest")
         self.arena_url = g("arena_url", "https://tokenz-arena.lonk-kelvin.ts.net")
         self.tz = timezone(timedelta(hours=float(cfg.get("api", "utc_offset_hours", 9))))
         secrets_dir = Path(g("secrets_dir", "/secrets"))

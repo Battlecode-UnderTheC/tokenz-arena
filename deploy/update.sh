@@ -35,7 +35,7 @@ docker compose up -d --remove-orphans
 echo "$want" > "$stamp"
 # The worker image rented machines pull (docs/SCALER.md): pushed when the registry login is set
 # up ($ARENA_SECRETS/registry-push: "user password"). A failed push doesn't fail the deploy.
-REG_IMAGE="${REGISTRY_IMAGE:-registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena}"
+REG_IMAGE="${REGISTRY_IMAGE:-registry.syeyoung.dev/undertehc/tokenz-arena}"
 if [ -f "$ARENA_SECRETS/registry-push" ]; then
   read -r reg_user reg_pass < "$ARENA_SECRETS/registry-push"
   if printf '%s' "$reg_pass" | docker login "${REG_IMAGE%%/*}" -u "$reg_user" --password-stdin >/dev/null 2>&1 \

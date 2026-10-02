@@ -60,7 +60,7 @@ like any worker's.
 | `idle_minutes`, `min_minutes`, `boot_minutes` | 10, 20, 15 | Shrinking and broken-machine timeouts. |
 | `min_threads`, `min_reliability`, `ram_per_slot_gb`, `disk_gb`, `max_bandwidth_per_gb`, `max_per_slot_hour` | 32, 0.98, 1.5, 40, 0.02, 0.02 | Which offers qualify. |
 | `slots_per_thread` | 1.0 | Games per hardware thread. |
-| `image` | `registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena:latest` | The worker image, pushed by `deploy/update.sh` on every deploy (`registry-push` holds the read-write login; rented machines get the read-only `registry-login`). |
+| `image` | `registry.syeyoung.dev/undertehc/tokenz-arena:latest` | The worker image, pushed by `deploy/update.sh` on every deploy (`registry-push` holds the read-write login; rented machines get the read-only `registry-login`). |
 | `max_rents_per_hour`, `max_boot_failures`, `engine_down_minutes` | 4, 2, 10 | Safety limits (above). |
 | `worker_idle_minutes`, `worker_orphan_minutes` | 30, 20 | When a rented worker destroys its own instance. |
 | `secrets_dir` | `/secrets` | Holds `vast-key`, `worker-ts-authkey` and `registry-login` (`user password`). |
