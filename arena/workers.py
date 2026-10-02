@@ -4,17 +4,24 @@ The engine keeps the queue (arena/queue.py); a worker leases games from it. A le
 counts as running, so it's never handed out twice; a lease that isn't renewed by heartbeats
 expires and the game is owed again. Holdout games are never leased: their maps stay on the
 engine's machine.
+
+Tokens: `[workers] tokens` in arena.toml (our own machines), plus data_dir/worker-tokens.json,
+{name: {"token": ..., ...}}, re-read when it changes. The scaler (arena/scaler.py) writes one per
+rented instance and marks it "revoked": true when the instance is destroyed. Results from every
+worker are trusted as they come.
 """
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import secrets
 import threading
 import time
 from dataclasses import dataclass, field
 
-from arena import queue, scheduler
+from arena import queue, scheduler, store
 from arena.state import ENGINE, Arena, now, rules
 
 LEASE_SECONDS = 120
@@ -39,6 +46,22 @@ class Worker:
     done: list = field(default_factory=list)     # monotonic times of recorded results
 
 
+@contextlib.contextmanager
+def tokens_file(cfg):
+    """data_dir/worker-tokens.json under an exclusive lock (the scaler writes it; the engine
+    reads it): yields the dict, saved when the block ends."""
+    path = cfg.data_dir / "worker-tokens.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(cfg.data_dir / ".worker-tokens.lock", "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            d = store.read_json(path, {}) or {}
+            yield d
+            store.write_json(path, d)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def file_sha(path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -55,14 +78,39 @@ class Registry:
         self.leases: dict[str, dict] = {}            # lease id -> {job, worker, expires}
         self.lease_seconds = int(arena.cfg.get("workers", "lease_seconds", LEASE_SECONDS))
         self._map_sha: dict[str, tuple] = {}
+        self._dyn: dict = {}
+        self._dyn_mtime = None
 
     # ------------------------------------------------------------------ auth and identity
+    def dynamic_tokens(self) -> dict:
+        """data_dir/worker-tokens.json (the scaler's per-instance tokens), re-read on change."""
+        p = self.arena.cfg.data_dir / "worker-tokens.json"
+        try:
+            m = p.stat().st_mtime_ns
+        except FileNotFoundError:
+            m = None
+        if m != self._dyn_mtime:
+            self._dyn = (store.read_json(p, {}) or {}) if m else {}
+            self._dyn_mtime = m
+        return self._dyn
+
+    def untrusted(self, token_name: str | None) -> bool:
+        return bool(token_name) and token_name in self.dynamic_tokens()
+
     def token_name(self, bearer: str | None) -> str:
-        tokens = self.arena.cfg.get("workers", "tokens", {}) or {}
+        tokens = dict(self.arena.cfg.get("workers", "tokens", {}) or {})
+        for name, d in self.dynamic_tokens().items():
+            if isinstance(d, dict) and d.get("token") and not d.get("revoked"):
+                tokens[name] = d["token"]
         for name, tok in tokens.items():
             if bearer and secrets.compare_digest(str(tok), bearer):
                 return name
         raise Refused("a valid worker token is required (Authorization: Bearer ...)", 401)
+
+    def token_of(self, worker: str) -> str | None:
+        with self.lock:
+            w = self.workers.get(worker)
+            return w.token if w else None
 
     def _touch(self, name: str, host: str, version: str, slots: int, token: str) -> Worker:
         if rules(version) != rules(ENGINE):
@@ -169,9 +217,9 @@ class Registry:
 
 
 def install(arena: Arena, daemon) -> Registry | None:
-    """Enables remote workers when [workers] tokens are configured."""
+    """Enables remote workers when [workers] tokens are configured or the scaler is on."""
     daemon.paused_remote = False
-    if not arena.cfg.get("workers", "tokens"):
+    if not arena.cfg.get("workers", "tokens") and not arena.cfg.get("scaler", "enabled", False):
         return None
     reg = Registry(arena, daemon)
     daemon.registry = reg

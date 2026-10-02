@@ -11,7 +11,8 @@ from arena.web import markdown
 
 DOCS = {"": ("TEAMMATES.md", "Guide"), "agents": ("AGENTS.md", "Agent brief"),
         "metrics": ("METRICS.md", "Metrics"),
-        "evals": ("EVALS.md", "Evals")}
+        "evals": ("EVALS.md", "Evals"),
+        "scaler": ("SCALER.md", "Scaler")}
 
 EXTRA_CSS = """
 .doc { max-width: 900px; line-height: 1.55; }

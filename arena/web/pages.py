@@ -1397,6 +1397,7 @@ f.onsubmit = async (ev) => {{
         event stream (/api/v1/queue/stream) as games start and finish."""
         body = """<h1>Queue <span id="q-live" class="sub">connecting…</span></h1>
 <h2>Judges <span class="sub" id="q-slots"></span></h2><div id="q-judges"></div>
+<p class="sub" id="q-scaler"></p>
 <p class="sub" id="q-sum"></p>
 <h2>Playing now</h2><div id="q-running"></div>
 <h2>Checking</h2><p id="q-checking"></p>
@@ -1450,6 +1451,18 @@ f.onsubmit = async (ev) => {{
     es.onerror = () => { status("reconnecting…", false); };
   }
   setInterval(() => document.querySelectorAll(".tick").forEach((el) => { el.textContent = ago(el.dataset.t); }), 1000);
+  async function scaler() {
+    try {
+      const s = await (await fetch("/api/v1/scaler")).json();
+      if (!s.updated) { $("q-scaler").textContent = ""; return; }
+      const p = s.plan || {}, inst = Object.values(s.instances || {});
+      $("q-scaler").innerHTML = `<b>vast.ai scaler</b>${s.dry_run ? " (dry run)" : ""}${s.paused ? " (paused)" : ""}: `
+        + `${inst.length} rented (${inst.reduce((n, i) => n + i.slots, 0)} slots, $${(s.per_hour || 0).toFixed(2)}/h) · `
+        + `today $${(s.spent_today || 0).toFixed(2)} of $${(s.caps || {}).per_day} · backlog needs ${p.needed_slots ?? "?"} slots, `
+        + `we own ${p.own_slots ?? "?"} · ${esc(p.decision || "")}${s.error ? ` · <b class="L">${esc(s.error)}</b>` : ""}`;
+    } catch (e) { /* the scaler is optional */ }
+  }
+  scaler(); setInterval(scaler, 15000);
   load().then(stream).catch(() => { status("can't reach the arena", false); setTimeout(() => location.reload(), 5000); });
 })();
 </script>"""

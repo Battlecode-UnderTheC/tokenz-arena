@@ -196,6 +196,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--import", dest="import_dir", metavar="DIR",
                    help="store battles crawled earlier (DIR/M<battle>/battle.json + replays) and exit")
     p.set_defaults(func=lambda a: __import__("arena.evals.collect", fromlist=["main"]).main(a))
+    p = sub.add_parser("scaler", help="rents vast.ai workers when the queue is long (docs/SCALER.md)")
+    p.add_argument("--config")
+    p.add_argument("--live", action="store_true", help="really rent (default: [scaler] dry_run, true)")
+    p.add_argument("--once", action="store_true", help="one decision, printed, then exit")
+    p.set_defaults(func=lambda a: __import__("arena.scaler", fromlist=["main"]).main(a))
     p = sub.add_parser("status", help="the leaderboard in the terminal")
     p.add_argument("--url", default="http://127.0.0.1:8700")
     p.set_defaults(func=_status)

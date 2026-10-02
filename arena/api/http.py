@@ -576,6 +576,11 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
             Q.get(arena).wait(since, max(0.0, min(float(wait), 25.0)))
         return queue(arena)
 
+    @api.get("/scaler")
+    def get_scaler():
+        """The vast.ai scaler: rented machines, spend today, caps, its last decisions."""
+        return store.read_json(arena.cfg.data_dir / "scaler" / "state.json", None) or {"enabled": False}
+
     @api.get("/queue/stream")
     async def queue_stream(request: Request):
         """Server-sent events: a `queue` event with the full view whenever it changes (at

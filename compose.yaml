@@ -45,6 +45,14 @@ services:
 
   # Evals: downloads finished battles between other teams from the competition server and
   # checks our metrics against them (data/evals/). Its own process; the website only reads.
+  # Scaler: rents vast.ai workers while the queue is long (docs/SCALER.md). Own process; it
+  # reads the engine's queue on 127.0.0.1:8701 and writes data/scaler/ and worker-tokens.json.
+  scaler:
+    <<: *arena
+    command: ["arena", "scaler", "--config", "/data/arena.toml"]
+    depends_on: [tailscale, engine]
+    stop_grace_period: 5s
+
   evals:
     <<: *arena
     command: ["arena", "evals", "--config", "/data/arena.toml"]

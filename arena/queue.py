@@ -70,6 +70,7 @@ class GameQueue:
         self.sigs: dict[str, tuple] = {}
         self.stamp = None
         self.last_gid = 0                         # games up to this id are in `played`
+        self.avg_s = 30.0                         # recent games' mean length, for the scaler
         self.last_audit = time.monotonic()
         self.rebuild()
 
@@ -102,6 +103,9 @@ class GameQueue:
             old_left = dict(self.left)
             self.played, self.met = played, met
             self.last_gid = a.games[-1].id if a.games else 0
+            recent = [g.seconds for g in a.games[-500:] if g.seconds and not g.error and g.lane != "server"]
+            if recent:
+                self.avg_s = sum(recent) / len(recent)
             self.jobs, self.owners, self.pending, self.left, self.sigs = {}, collections.defaultdict(set), {}, {}, {}
             for s in list(a.subs.values()):
                 self._load_sub(s)
@@ -317,6 +321,8 @@ class GameQueue:
             self.last_gid = max(self.last_gid, g.id)
             if job is not None:
                 a.running.pop(job.key, None)        # the game and its result land in one step
+            if g.seconds and not g.error and g.lane != "server":
+                self.avg_s += (g.seconds - self.avg_s) / 200          # ~ the last few hundred games
             if current_game(g) and key not in self.played:
                 self.played.add(key)
                 if is_rated(g):
@@ -379,7 +385,8 @@ class GameQueue:
                "slots": {"local": local, "remote": {w["name"]: w["slots"] for w in remote}},
                "remote": remote, "running": running, "checking": checking, "waiting": waiting,
                "totals": {"left": sum(by_lane.values()), "by_lane": dict(by_lane),
-                          "running": len(running)}}
+                          "running": len(running)},
+               "avg_game_s": round(self.avg_s, 1)}
         self._view = (v, out)
         return out
 
