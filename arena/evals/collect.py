@@ -72,6 +72,7 @@ class Collector:
         self.known: set[int] = set()              # game ids loaded or stored by this process
         self.dirty = True
         self._last_call = 0.0
+        self._last_upkeep = 0.0
         self.status = {"started": iso(clock()), "polls": 0, "last_poll": None, "last_error": None,
                        "new_games": 0, "requests": 0}
 
@@ -267,6 +268,7 @@ class Collector:
         store.write_json(self.path("status.json"), self.status)
 
     def upkeep(self):
+        self._last_upkeep = self.clock()
         self.drain()
         self.recompute()
         self.write_report()
@@ -275,13 +277,17 @@ class Collector:
     # ------------------------------------------------------------------ the loop
     def poll(self):
         found = self.discover()
+        log.info("evals: %d new battles to fetch", len(found))
         n = 0
         for bid, listing in sorted(found.items()):
             try:
                 n += self.fetch(bid, listing)
             except ServerError as e:
                 log.warning("battle %s: %s", bid, e)
-            self.drain()
+            if self.clock() - self._last_upkeep >= 60:     # a long first poll still shows progress
+                self.upkeep()
+            else:
+                self.drain()
         self.status.update(last_poll=iso(self.clock()), polls=self.status["polls"] + 1, last_found=len(found))
         log.info("evals: poll found %d new battles, stored %d", len(found), n)
 
