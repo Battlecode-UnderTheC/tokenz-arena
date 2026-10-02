@@ -128,8 +128,12 @@ context is needed.
 uv run arena worker --arena https://tokenz-arena.<tailnet>.ts.net --token ... --slots 16
 ```
 
-- **Cache.** Bots by source sha256 (zip, unpacked, and the judge's compiled wasm, which is keyed
-  by folder name and content, so a C++ bot compiles once per machine). Maps by sha256.
+- **Cache.** Bots by source sha256 (zip and unpacked) and maps by sha256. A C/C++ bot isn't
+  compiled on the worker at all: the engine builds it once with the judge's clang
+  (`GET /api/v1/workers/wasm/{id}`, file name in `X-Wasm-Name`), and the worker puts that file in
+  the judge's own cache, whose name is a hash of the judge's flags and the sources, the same on
+  every machine. If that doesn't work out, the judge builds it there, once per machine: builds of
+  one bot wait on a lock, so 100 parallel games don't compile it 100 times.
 - **Slots.** `--slots` defaults to the core count divided by 1.5, since a game uses one to three
   cores at peak.
 - **Leaving.** `SIGTERM` stops leasing, finishes the running games (up to 10 minutes; an abandoned

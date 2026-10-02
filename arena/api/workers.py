@@ -111,6 +111,21 @@ def make_router(arena: Arena) -> APIRouter:
             raise HTTPException(404, f"no submission {sid!r}")
         return FileResponse(p, media_type="application/zip", filename=f"{s.id}.zip")
 
+    @r.get("/wasm/{sid}")
+    def wasm(sid: str, request: Request):
+        """A C/C++ bot built to wasm by the judge's clang (built here once, on first ask), with
+        its judge-cache file name in X-Wasm-Name: a worker puts it in its own cache and never
+        compiles. 404 for a Python bot."""
+        token_name(arena, request)
+        from arena import runner
+        d = arena.cfg.bots / Path(sid).name
+        if not d.is_dir():
+            raise HTTPException(404, f"no bot {sid!r}")
+        p = runner.build_wasm(d)
+        if p is None or not p.exists():
+            raise HTTPException(404, "not a compiled (C/C++) bot")
+        return FileResponse(p, media_type="application/wasm", headers={"X-Wasm-Name": p.name})
+
     @r.get("/map/{suite}/{name}")
     def map_file(suite: str, name: str, request: Request):
         token_name(arena, request)

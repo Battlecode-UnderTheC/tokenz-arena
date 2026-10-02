@@ -11,6 +11,7 @@ parallel games never share build output. The result is parsed from the judge's s
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -81,6 +82,52 @@ def parse(log: str) -> GameResult:
     return result
 
 
+def wasm_path(bot: Path) -> Path | None:
+    """Where the judge caches this bot's wasm, or None for a bot without C/C++ sources. The name
+    is the folder name plus a hash of the judge's flags and the sources, computed exactly as
+    unswbc's clangtool.build does, so it's the same on every machine with this unswbc: a worker
+    can download the engine's build and the judge finds it in its cache."""
+    from unswbc import clangtool
+    from unswbc.sandbox import _cache_dir
+    bot = Path(bot)
+    found = clangtool.sources(bot)
+    if not found:
+        return None
+    stamp = hashlib.sha256(
+        repr([clangtool.DRIVER_FLAGS, clangtool.LINK_FLAGS, clangtool.LINK_TAIL,
+              [p.as_posix() for p in found]]).encode()
+        + b"".join((bot / p).read_bytes() for p in found)).hexdigest()[:32]
+    return _cache_dir() / "wasmbots" / f"{bot.resolve().name}-{stamp}.wasm"
+
+
+def build_wasm(bot: Path) -> Path | None:
+    """Builds a C/C++ bot's wasm with the judge's own clang, once per machine: under a file lock
+    per bot, so parallel games (or downloads) wait for one build instead of each compiling it.
+    Returns the cached file (None for a Python bot)."""
+    import fcntl
+
+    from unswbc import clangtool
+    from unswbc.sandbox import _cache_dir
+    bot = Path(bot)
+    if not clangtool.sources(bot):
+        return None
+    locks = _cache_dir() / "wasmbots"
+    locks.mkdir(parents=True, exist_ok=True)
+    with open(locks / f".{bot.resolve().name}.lock", "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)                # the first builds; the rest wait for it
+        return Path(clangtool.build(bot))            # returns at once when it's already cached
+
+
+def prebuild(bot: Path) -> None:
+    """build_wasm() before a game; any problem is left to the game itself to report."""
+    try:
+        build_wasm(bot)
+    except Exception as e:
+        import logging
+        logging.getLogger("arena").warning("prebuild of %s: %s: %s (the game will build it)",
+                                           Path(bot).name, type(e).__name__, e)
+
+
 def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
          work_root: Path | None = None, unswbc: str = "unswbc", timeout: float = 1800) -> GameResult:
     """Plays bot_a (team A) against bot_b (team B). Raises JudgeError when there's no verdict.
@@ -91,6 +138,8 @@ def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
     """
     map_path, replay_dir = map_path.resolve(), replay_dir.resolve()
     replay_dir.mkdir(parents=True, exist_ok=True)
+    for bot in (bot_a, bot_b):
+        prebuild(Path(bot))
     if work_root:
         work_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="game-", dir=work_root) as work:

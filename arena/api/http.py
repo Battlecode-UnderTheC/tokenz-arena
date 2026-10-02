@@ -349,7 +349,8 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
                     pass
                 return await call_next(request)         # the engine's last snapshot
             if path.startswith("/api/") and (request.method not in ("GET", "HEAD", "OPTIONS")
-                                             or path.startswith("/api/v1/server")):
+                                             or path.startswith("/api/v1/server")
+                                             or path.startswith("/api/v1/workers/wasm/")):
                 headers = {k: v for k, v in request.headers.items() if k.lower() not in FORWARD_DROP}
                 headers["x-arena-client-ip"] = request.client.host if request.client else ""
                 try:
@@ -363,7 +364,7 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
                 if request.method not in ("GET", "HEAD"):
                     await asyncio.to_thread(arena.refresh)      # show the change at once
                 keep = {k: v for k, v in r.headers.items()
-                        if k.lower() in ("content-type", "retry-after", "content-disposition")}
+                        if k.lower() in ("content-type", "retry-after", "content-disposition", "x-wasm-name")}
                 return Response(r.content, status_code=r.status_code, headers=keep)
             return await call_next(request)
 

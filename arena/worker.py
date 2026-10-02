@@ -10,6 +10,7 @@ compiles each C/C++ bot once per machine too.
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import logging
@@ -43,6 +44,7 @@ class Worker:
         self.heartbeat_seconds = 30
         self.procs = ProcessPoolExecutor(max(1, slots), mp_context=mp.get_context("spawn"))
         self.fetch_lock = threading.Lock()
+        self.wasm_locks: dict = collections.defaultdict(threading.Lock)
         self.idle_exit = idle_exit                 # exit after this long with nothing to do (0: never)
         self.last_work = time.monotonic()
         self.last_contact = time.monotonic()       # the arena last answered
@@ -83,13 +85,44 @@ class Worker:
     def bot(self, b: dict) -> Path:
         from arena.submit import _unpack
         root = self.cache / "bots" / b["sha256"][:24] / b["id"]
-        if (root / "bot.toml").exists():
-            return root
-        z = self._fetch(f"/api/v1/workers/bot/{b['id']}", self.cache / "zips" / f"{b['sha256']}.zip", b["sha256"])
-        with self.fetch_lock:
-            if not (root / "bot.toml").exists():
-                _unpack(z.read_bytes(), root)
+        if not (root / "bot.toml").exists():
+            z = self._fetch(f"/api/v1/workers/bot/{b['id']}", self.cache / "zips" / f"{b['sha256']}.zip", b["sha256"])
+            with self.fetch_lock:
+                if not (root / "bot.toml").exists():
+                    _unpack(z.read_bytes(), root)
+        self.wasm(b["id"], root)
         return root
+
+    def wasm(self, sid: str, root: Path):
+        """Puts the engine's build of this bot into the judge's cache, so the first game here
+        doesn't compile it (~75 s a bot). Anything off (a Python bot, an unswbc with other
+        flags, a network error) just leaves the judge to build it, once, under its lock."""
+        from arena import runner
+        try:
+            local = runner.wasm_path(root)
+        except Exception:
+            return
+        if local is None or local.exists():
+            return
+        with self.wasm_locks[sid]:
+            if local.exists():
+                return
+            try:
+                req = urllib.request.Request(self.arena + f"/api/v1/workers/wasm/{sid}")
+                req.add_header("Authorization", f"Bearer {self.token}")
+                with urllib.request.urlopen(req, timeout=600) as r:
+                    name, data = r.headers.get("X-Wasm-Name"), r.read()
+            except Exception as e:
+                log.warning("no prebuilt wasm for %s (%s): the judge will build it here", sid, e)
+                return
+            if name != local.name:
+                log.warning("the engine's build of %s is %s, ours would be %s: building here", sid, name, local.name)
+                return
+            local.parent.mkdir(parents=True, exist_ok=True)
+            tmp = local.with_name(local.name + f".{uuid.uuid4().hex}")
+            tmp.write_bytes(data)
+            tmp.rename(local)
+            log.info("got %s's wasm from the engine (%d KB)", sid, len(data) // 1024)
 
     def map(self, suite: str, m: dict) -> Path:
         return self._fetch(f"/api/v1/workers/map/{suite}/{m['name']}",
