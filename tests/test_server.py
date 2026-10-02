@@ -506,4 +506,8 @@ def test_force_upload_skips_the_gate_and_is_logged(bridge, arena, fake):
     fake.set("POST", "/api/v1/submissions", {"error": "zip too large"}, status=413)
     r = c.post("/api/v1/server/upload", json={"submission": other.id})
     assert r.status_code >= 400 and "zip too large" in r.text
-    assert "Upload to the competition server now" in c.get(f"/s/{other.id}").text
+    page = c.get(f"/s/{other.id}").text
+    assert "Upload to the competition server now" in page and 'class="page-head"' in page
+    # the dialog text must stay one JS string: a raw newline inside it kills the whole script
+    script = page.split('id="fu-go"', 1)[1].split("</script>", 1)[0]
+    assert 'live bot?\\n\\n"' in script and 'live bot?\n' not in script

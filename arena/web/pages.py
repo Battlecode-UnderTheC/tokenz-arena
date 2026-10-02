@@ -394,19 +394,31 @@ def source_link(url: str | None) -> str:
     return out
 
 
+FORCE_UPLOAD_CSS = """
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px 16px; flex-wrap: wrap; }
+.page-head h1 { margin-bottom: 4px; }
+.force-upload.compact { margin: 6px 0 0; text-align: right; max-width: 380px; }
+.force-upload.compact #fu-msg { display: block; font-size: 12px; margin-top: 4px; }
+"""
+
+
 def force_upload_html(default: str = "", fixed: bool = False) -> str:
     """The "upload to the competition server now" control: skips the auto-submit gate, after a
-    confirmation. `fixed`: for one submission (its page); otherwise a box to name any."""
+    confirmation. `fixed`: for one submission (top right of its page); otherwise a box to name
+    any (the Server page)."""
     field = (f'<input type="hidden" id="fu-id" value="{e(default)}">' if fixed else
              f'<input id="fu-id" value="{e(default)}" placeholder="submission id" size="24">')
-    return f"""<p class="force-upload">{field}
-<button id="fu-go">Upload to the competition server now</button>
-<span id="fu-msg" class="muted">skips the auto-submit gate; becomes our live bot on the server</span></p>
+    hint = "skips the auto-submit gate; becomes our live bot on the server"
+    # The JS below is inside a Python f-string: "\\\\n" here is "\\n" in the page (a newline in the
+    # dialog). A bare newline inside a JS string is a syntax error and kills the whole script.
+    return f"""<style>{FORCE_UPLOAD_CSS}</style><p class="force-upload{' compact' if fixed else ''}">{field}
+<button id="fu-go" title="{hint}">Upload to the competition server now</button>
+<span id="fu-msg" class="muted">{hint if not fixed else ''}</span></p>
 <script>
 document.getElementById("fu-go").onclick = async (ev) => {{
   const sid = document.getElementById("fu-id").value.trim(), m = document.getElementById("fu-msg");
   if (!sid) return;
-  if (!confirm("Upload " + sid + " to the competition server and make it our live bot?\n\n"
+  if (!confirm("Upload " + sid + " to the competition server and make it our live bot?\\n\\n"
                + "This skips the auto-submit gate. It's logged as forced, with your name.")) return;
   ev.target.disabled = true; m.textContent = "uploading…";
   try {{
@@ -414,7 +426,8 @@ document.getElementById("fu-go").onclick = async (ev) => {{
                                                       body: JSON.stringify({{submission: sid}})}});
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || j.error || r.status);
-    m.textContent = "uploaded " + sid + " as server version " + j.server_version + " and activated it";
+    m.textContent = "uploaded " + sid + " as server version " + j.server_version + (j.activated
+      ? ": it's our live bot now" : ": the server is still building it; it's made live automatically when ready");
   }} catch (err) {{ m.textContent = "failed: " + err.message; ev.target.disabled = false; }}
 }};
 </script>"""
@@ -772,9 +785,9 @@ async function setParent() {{
 <h2>Worst losses</h2>{table(["game", "map", "opponent", "rounds", "end", ""], losses, numeric={0, 3},
                              empty="no losses")}"""
         games = http.find_games(arena, sub=s.id, limit=500)
-        body = f"""<h1>{e(s.id)}</h1>
+        body = f"""<div class="page-head"><h1>{e(s.id)}</h1>{server_upload}</div>
 {rejected}
-<div class="grid2"><div>{info}{promote}{server_upload}</div>
+<div class="grid2"><div>{info}{promote}</div>
 <div><h2 style="margin-top:0">Note {'<button class="small" onclick="editNote()">edit</button>' if can_edit else ''}
 <a class="sub" href="/lineage?root={q(lineage_root(arena, s.id))}#{q(s.id)}">lineage</a></h2>
 <pre id="note">{e(s.note) or '<span class="muted">(no note)</span>'}</pre>

@@ -590,8 +590,8 @@ class Bridge:
             self._save("versions")
         self.record("upload", submission=sid, server_version=ver, by=by, evidence=evidence)
         self.state["last_upload"] = now()
-        self._activate(str(ver), by)
-        return {"server_version": ver, "submission": sid}
+        activated = self._activate(str(ver), by)
+        return {"server_version": ver, "submission": sid, "activated": activated}
 
     def force_upload(self, sid: str, by: str) -> dict:
         """Uploads and activates an arena submission on the competition server now, whatever the
@@ -633,8 +633,10 @@ class Bridge:
         """An upload whose activation failed (still building, say) is retried for an hour."""
         for ver, v in list(self.versions.items()):
             t = _ts(v.get("uploaded"))
-            if v.get("by") == "auto-submit" and not v.get("activated") and t and time.time() - t < 3600:
-                self._activate(ver, "auto-submit (retry)")
+            by = v.get("by") or ""
+            if (by == "auto-submit" or by.endswith("(forced)")) and not v.get("activated") and t \
+                    and time.time() - t < 3600:
+                self._activate(ver, f"{by} (retry)")
 
     def link(self, ver, arena_id: str, by: str) -> dict:
         """Records that our server version `ver` is arena submission `arena_id` (for versions
