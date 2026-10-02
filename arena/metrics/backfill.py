@@ -49,11 +49,11 @@ def todo(arena, limit: int) -> list:
     return out
 
 
-def run(arena, batch: int = 8):
+def run(arena, batch: int | None = None):
     if not _BUSY.acquire(blocking=False):          # the previous batch is still going
         return
     try:
-        _run(arena, batch)
+        _run(arena, batch or 6 * _procs(arena))
     finally:
         _BUSY.release()
 
@@ -61,7 +61,7 @@ def run(arena, batch: int = 8):
 def _run(arena, batch: int):
     global _POOL
     if _POOL is None:
-        _POOL = ProcessPoolExecutor(int(arena.cfg.get("metrics", "backfill_procs", 2)),
+        _POOL = ProcessPoolExecutor(_procs(arena),
                                     mp_context=mp.get_context("spawn"), initializer=_nice)
     games = todo(arena, batch)
     futs = {g.id: _POOL.submit(_one, str(arena.cfg.replays / g.replay)) for g in games}
@@ -75,5 +75,9 @@ def _run(arena, batch: int):
         log.info("metrics: backfilled %d games", done)
 
 
+def _procs(arena) -> int:
+    return int(arena.cfg.get("metrics", "backfill_procs", 4))
+
+
 def install(daemon):
-    daemon.every(15, lambda: run(daemon.arena), "metrics-backfill")
+    daemon.every(5, lambda: run(daemon.arena), "metrics-backfill")
