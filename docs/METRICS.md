@@ -95,6 +95,9 @@ def length_share(values, rnd):          # values: {metric: {"A": x, "B": y}}
     return a / (a + b) if a + b else 0.5
 ```
 
+A derived metric fitted on games (like the eval) should say `fitted="<ISO time of the newest game
+the fit saw>"`: the evals (/evals) then judge it only on games after that, out of sample.
+
 **Changing** a metric: bump its `version`. The background task recomputes it for older games
 (newest first, real competition games before local ones). A metric that raises is recorded in
 the file's `errors` and doesn't stop the others.

@@ -19,6 +19,8 @@ ELO = (("1900+", 1900, 10 ** 6), ("1700-1899", 1700, 1900), ("under 1700", -10 *
 
 
 def ts(at: str | None) -> float:
+    if not at:
+        return 0.0
     try:
         return datetime.fromisoformat(str(at).replace("Z", "+00:00")).timestamp()
     except ValueError:
@@ -205,7 +207,9 @@ def elo_rows(ds: list[dict]) -> list[dict]:
 
 def window(ds: list[dict], versions: dict, describe: list[dict]) -> dict:
     decided = [d for d in ds if d["winner"] in ("A", "B")]
-    cur = [d for d in decided if d["versions"].get("eval") == versions.get("eval")]
+    # the eval is judged out of sample: the current version, on games after its fit
+    fitted = ts(next((m.get("fitted") for m in describe if m["name"] == "eval"), None))
+    cur = [d for d in decided if d["versions"].get("eval") == versions.get("eval") and d["ts"] > fitted]
     endings: dict[str, int] = {}
     for d in ds:
         k = ending(d)
@@ -235,7 +239,8 @@ def recent(ds: list[dict], n: int = 60) -> list[dict]:
 def build(digests: list[dict], versions: dict, describe: list[dict], now: float | None = None) -> dict:
     now = now or time.time()
     ds = [d for d in digests if d]
-    out = {"built": datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    fitted = next((m.get("fitted") for m in describe if m["name"] == "eval"), None)
+    out = {"eval_fitted": fitted, "built": datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "versions": versions, "windows": {}}
     for name, span in WINDOWS:
         sub = ds if span is None else [d for d in ds if d["ts"] >= now - span]

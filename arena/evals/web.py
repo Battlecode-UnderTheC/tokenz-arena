@@ -195,8 +195,8 @@ def make_router(arena) -> APIRouter:
         W = rep["windows"][w]
         tabs = '<p class="tabs">' + "".join(
             f'<a class="{"on" if k == w else ""}" href="/evals?w={k}">{k}</a>' for k in rep["windows"]) + "</p>"
-        summary = (f'<p>{e(W["games"])} games ({e(W["decided"])} decided, {e(W["eval_games"])} with the current eval '
-                   f'v{e(rep["versions"].get("eval"))}) from {e(W["battles"])} battles between {e(W["teams"])} teams, '
+        summary = (f'<p>{e(W["games"])} games ({e(W["decided"])} decided, {e(W["eval_games"])} judged out of sample: finished after the current eval '
+                   f'v{e(rep["versions"].get("eval"))} was fitted{(" on " + local_time(rep["eval_fitted"])) if rep.get("eval_fitted") else ""}) from {e(W["battles"])} battles between {e(W["teams"])} teams, '
                    f'{local_time(W["from"])} to {local_time(W["to"])}. Report built {local_time(rep["built"])}.</p>')
         rows = W["eval"]
         key = ('<p class="ev-key"><span><i style="background:#2f7fd6"></i>accuracy (eval &gt; 50% picks the winner)</span>'

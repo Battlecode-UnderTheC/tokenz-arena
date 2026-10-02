@@ -46,7 +46,7 @@ def _leader(v):
 
 @derived("eval", "Eval: P(A wins)", "chance team A wins, from dragons alive, board control, "
          "longest dragon, queen alive and who leads under the round-500 rule", version=2,
-         unit="probability")
+         unit="probability", fitted="2026-10-02T04:40:00Z")
 def eval_bar(values, rnd):
     if rnd >= 500:                     # the game is over: the result, not a prediction
         lead = _leader(values)

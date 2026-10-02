@@ -42,6 +42,7 @@ class Metric:
     unit: str = ""
     better: str = "higher"          # higher | lower | none (for colouring and summaries)
     derived: bool = False
+    fitted: str | None = None       # a fitted metric: the newest game its fit saw (ISO time)
 
 
 REGISTRY: dict[str, Metric] = {}
@@ -56,9 +57,12 @@ def metric(name: str, title: str, desc: str = "", version: int = 1, unit: str = 
 
 
 def derived(name: str, title: str, desc: str = "", version: int = 1, unit: str = "",
-            better: str = "none"):
+            better: str = "none", fitted: str | None = None):
+    """`fitted`: for a metric fitted on games, the newest game the fit saw (ISO time), so the
+    evals judge it only on later games (out of sample)."""
     def deco(fn):
-        REGISTRY[name] = Metric(name, title, desc, fn, version, unit, better, derived=True)
+        REGISTRY[name] = Metric(name, title, desc, fn, version, unit, better, derived=True,
+                                fitted=fitted)
         return fn
     return deco
 
@@ -84,7 +88,8 @@ def versions() -> dict[str, int]:
 
 def describe() -> list[dict]:
     return [{"name": m.name, "title": m.title, "desc": m.desc, "version": m.version,
-             "unit": m.unit, "better": m.better, "kind": "game" if m.derived else "team"}
+             "unit": m.unit, "better": m.better, "kind": "game" if m.derived else "team",
+             "fitted": m.fitted}
             for m in load_plugins().values()]
 
 
