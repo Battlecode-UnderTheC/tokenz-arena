@@ -58,16 +58,67 @@ def map_name(p: Path) -> str:
 
 def suite_files(cfg: Config, suite: str) -> list[Path]:
     """The maps of one suite, without duplicates across suites: the `server` suite (the
-    competition's maps in play, with its real dragon placement) supersedes the official copy
-    of the same map, so `official` keeps only the official maps the server doesn't play."""
+    competition's maps in play, exactly as the server has them) supersedes the official and
+    tournament copies of the same map, so those keep only maps the server doesn't play."""
     dirs = [cfg.map_dir(suite)]
     if suite == "holdout":                      # generated + hidden team uploads
         dirs.append(cfg.map_dir("holdout_custom"))
     files = sorted(p for d in dirs if d and d.is_dir() for p in d.glob("*.map"))
-    if suite == "official":
+    if suite in ("official", "tournament"):
         server = {map_name(p) for p in suite_files(cfg, "server")}
         files = [p for p in files if map_name(p) not in server]
     return files
+
+
+# ---------------------------------------------------------------------------- map versions
+# A map can change under the same name (the server re-publishes it, a toolkit release fixes it).
+# Each game records the sha256 of the map file it was played on (meta.map_sha), and only games
+# on the current content count (state.current_map); the others are kept as history and the
+# scheduler plays them again on the new map.
+
+PLAYED_SUITES = ("server", "official", "tournament", "custom", "rotating", "holdout")
+_SHAS: dict = {}
+_LIVE: dict = {"at": 0.0, "cfg": None, "val": ({}, {})}
+LIVE_TTL = 30.0
+
+
+def norm(name: str) -> str:
+    """A map name or file stem, normalised: 'Around_UNSW' -> 'around unsw'."""
+    return " ".join(str(name).lower().replace("_", " ").split())
+
+
+def file_sha(p: Path) -> str:
+    """sha256 of a map file, cached by path, size and mtime."""
+    st = p.stat()
+    key = (str(p), st.st_size, st.st_mtime_ns)
+    if key not in _SHAS:
+        _SHAS[key] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return _SHAS[key]
+
+
+def live(cfg: Config) -> tuple[dict, dict]:
+    """The maps in play now: ({(suite, stem): sha256}, {normalised stem: sha256}), re-listed
+    every LIVE_TTL seconds. The second finds a map that moved suites (a tournament map the
+    server now plays); the server's copy wins a name clash."""
+    t = time.monotonic()
+    if _LIVE["cfg"] is cfg and t - _LIVE["at"] < LIVE_TTL:
+        return _LIVE["val"]
+    by_key: dict = {}
+    by_name: dict = {}
+    for suite in PLAYED_SUITES:
+        try:
+            files = suite_files(cfg, suite)
+        except Exception:                        # a suite that can't be listed (no worldgen yet)
+            continue
+        for p in files:
+            try:
+                sha = file_sha(p)
+            except OSError:
+                continue
+            by_key[(suite, p.stem)] = sha
+            by_name.setdefault(norm(p.stem), sha)
+    _LIVE.update(at=t, cfg=cfg, val=(by_key, by_name))
+    return by_key, by_name
 
 
 def epoch(now: float | None = None) -> int:

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Team arena for unswbc dragons bots: official-judge games, ratings, reports, replays over HTTP and MCP"
 requires-python = ">=3.12"
 dependencies = [
-    "unswbc==1.2.3",          # the judge; keep at the competition server's version
+    "unswbc==1.2.7",          # the judge; keep at the competition server's version
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "mcp>=1.2",

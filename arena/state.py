@@ -108,6 +108,7 @@ class Arena:
     def __init__(self, cfg: Config, readonly: bool = False):
         self.cfg = cfg
         self.readonly = readonly
+        MAP_CFG[0] = cfg
         self._stamps: dict = {}
         self.lock = threading.RLock()
         self.subs: Subs = Subs()
@@ -259,6 +260,10 @@ try:
 except PackageNotFoundError:
     ENGINE = "unknown"
 FIRST_ENGINE = "1.2.3"                    # games recorded before games carried their engine
+# Toolkit releases whose judge is byte-identical to an earlier one's (same rules, same results):
+# their games stay comparable. 1.2.4-1.2.7 changed only the bundled maps and the replay viewer.
+SAME_RULES = {"1.2.7": "1.2.3"}
+MAP_CFG: list = [None]                    # the arena's config, for current_map (set by Arena)
 
 RATED_LANES = {"draft", "placement", "continuous"}
 HIDDEN_SUITES = {"holdout", "check"}     # never in ratings, listings or replays
@@ -269,13 +274,35 @@ def is_rated(g: Game) -> bool:
     rotating): what ratings, records and head-to-heads count. Real server games (lane
     'server'), checks and the hidden holdout don't count."""
     return (g.lane in RATED_LANES and g.suite not in HIDDEN_SUITES and not g.error and g.a != g.b
-            and current_engine(g))
+            and current_game(g))
+
+
+def rules(version: str) -> str:
+    return SAME_RULES.get(version, version)
 
 
 def current_engine(g: Game) -> bool:
-    """Played under the judge version running now. When unswbc changes (a rule change), older
-    games become historical: kept and shown, but out of ratings and verdicts."""
-    return (g.meta or {}).get("engine", FIRST_ENGINE) == ENGINE
+    """Played under the judge running now (or one with the same rules). When the rules change,
+    older games become historical: kept and shown, but out of ratings and verdicts."""
+    return rules((g.meta or {}).get("engine", FIRST_ENGINE)) == rules(ENGINE)
+
+
+def current_map(g: Game) -> bool:
+    """Played on the map's current content (meta.map_sha). A map that changed since is history,
+    like an old judge's games; a map no longer in play at all (last week's rotating set) keeps
+    its games."""
+    cfg = MAP_CFG[0]
+    if cfg is None or g.suite == "check" or g.lane == "server":
+        return True
+    from arena import maps
+    by_key, by_name = maps.live(cfg)
+    sha = by_key.get((g.suite, g.map)) or by_name.get(maps.norm(g.map))
+    mine = (g.meta or {}).get("map_sha")
+    return sha is None or mine is None or mine == sha      # None: not stamped yet (migrate.py)
+
+
+def current_game(g: Game) -> bool:
+    return current_engine(g) and current_map(g)
 
 
 def result_for(g: Game, sid: str) -> str | None:

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable
 
 from arena import judge, rating, scheduler, store, submit
-from arena.state import CHECKING, ENGINE, Arena, Game, current_engine, now
+from arena.state import CHECKING, ENGINE, Arena, Game, current_game, now
 
 log = logging.getLogger("arena")
 
@@ -146,7 +146,7 @@ class Daemon:
         expired lease's game was played again elsewhere and both results arrive."""
         a, cfg = self.arena, self.arena.cfg
         with a.lock:
-            done = any((g.a, g.b, g.suite, g.map, g.seed) == job.key and current_engine(g)
+            done = any((g.a, g.b, g.suite, g.map, g.seed) == job.key and current_game(g)
                        for g in reversed(a.games[-5000:]))
             r = a.running.get(job.key)
             if r and r.get("worker", "local") == worker:
@@ -156,6 +156,11 @@ class Daemon:
             return False
         g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
                  a=job.a, b=job.b, meta={"engine": ENGINE, "worker": worker})
+        try:
+            from arena.maps import file_sha
+            g.meta["map_sha"] = file_sha(Path(job.map))       # the map content it was played on
+        except OSError:
+            pass
         if res.get("error"):
             g.error = res["error"]
         else:

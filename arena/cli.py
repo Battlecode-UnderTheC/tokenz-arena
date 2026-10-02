@@ -32,6 +32,10 @@ def _serve(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     cfg = config.load(Path(args.config) if args.config else None)
     arena = Arena(cfg)
+    from arena.migrate import stamp_map_shas
+    n = stamp_map_shas(arena)
+    if n:
+        logging.getLogger("arena").info("stamped %d older games with their map's sha256", n)
     daemon = Daemon(arena)
     if cfg.get("maps", "worldgen", True):
         daemon.install_maps()
@@ -62,6 +66,10 @@ def _engine(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     cfg = config.load(Path(args.config) if args.config else None)
     arena = Arena(cfg)
+    from arena.migrate import stamp_map_shas
+    n = stamp_map_shas(arena)
+    if n:
+        logging.getLogger("arena").info("stamped %d older games with their map's sha256", n)
     daemon = Daemon(arena)
     if cfg.get("maps", "worldgen", True):
         daemon.install_maps()

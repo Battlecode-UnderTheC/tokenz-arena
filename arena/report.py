@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 
-from arena.state import Arena, current_engine, is_rated, result_for, wdl
+from arena.state import Arena, current_game, is_rated, result_for, wdl
 
 CPU_CAP = 100_000_000
 
@@ -50,8 +50,8 @@ def build(arena: Arena, sid: str) -> dict:
         s = arena.subs[sid]
         games = [g for g in arena.games_of(sid) if g.a != g.b]
         local = [g for g in games if is_rated(g)]
-        holdout = [g for g in games if g.suite == "holdout" and current_engine(g) and not g.error]
-        historical = sum(1 for g in games if not current_engine(g))
+        holdout = [g for g in games if g.suite == "holdout" and current_game(g) and not g.error]
+        historical = sum(1 for g in games if not current_game(g))
     by_opp: dict[str, list] = {}
     by_map: dict[str, list] = {}
     deaths: dict[str, int] = {}

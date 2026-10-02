@@ -160,3 +160,79 @@ def rename_submissions(cfg: Config, table: Path, dry_run: bool = True,
     store.write_json(cfg.data_dir / "aliases.json", aliases)
     report["dry_run"] = False
     return report
+
+
+# ---------------------------------------------------------------------------- map versions
+# The repo's official and tournament maps as every game before map versions was played on
+# them (the files never changed from the arena's first commit to unswbc 1.2.7's maps).
+LEGACY_MAP_SHA = {
+    ("official", "Colosseum"): "c7549a41ea26600f613a7d906e5c73e90303f3bc037b28d8aa2751cd17819772",
+    ("official", "arena"): "b4bab09603289c2d186ca94d6cf5362e5cc8f24637736c497d9651c0dd921937",
+    ("official", "autarky"): "35737755c5a3123fcd4c3fd1cf1ecb08513adf9ac14c351f00f76c23e9bd6dbd",
+    ("official", "big_empty"): "6cb3b7be72a4e27ed19363e9009d46742851709f701e61d73b56437314fdd827",
+    ("official", "default"): "6bd7abf2ed51a7f667552c243ad038f4177e450cf2f9dd9be52f826f9e526f95",
+    ("official", "default_small"): "8ac4b2eedcf19f8544ab1866acfcbc628b3cb5ff2df87d80aa682dcb5aa9df19",
+    ("official", "devil"): "a09e8f2d3bdd1e40fad31a0ecdf00166cd1090c232c56dcc2557729de737f6aa",
+    ("official", "dilemma"): "d76d7ad9ada3a8d089b52f4a973e7e9acf7ae4b7f695e9f018caf6ae75bdb109",
+    ("official", "portals"): "56341e6577da7429efb6f33b64b79b0c4223c4fbd9df995713ad781bead5f423",
+    ("official", "queen_of_spades"): "126d71b46443268596285918d910b7f8d875bf3028ca9c5ff6bad97b4e868938",
+    ("official", "schooltime"): "726c404f3b34b4ed7b21cef83628407e70b717cd919f114e4a0e57f7f6d66520",
+    ("official", "slithery_fight"): "954ea0147fbc56532920caa51ecda03f21ef6765806d7adc0eef73f6069001bc",
+    ("official", "stronghold"): "c83cb7579e89fff0064b075f38250fa06487a10b6ddf320f6c57d63a84e9f32c",
+    ("official", "trauma"): "dcf39d713c060e5ded2d031a7ffe1a27ea60fe4b72ff8fb3fffbabc4f81e2066",
+    ("official", "trophy"): "5f1f6b23d6edb944954a9a31b95f229fd9966bec0875a9f04bca680aa3de33f5",
+    ("tournament", "around_unsw"): "7fbbc4f6407a3e6ea55bb18b94dfc1f7363c7a59f7a01766815ea9fcad7b12f4",
+    ("tournament", "australia"): "8bfe33cd0bfd01406ad55c6e139c520b16312a58199747c371648f1137d222f7",
+    ("tournament", "islands"): "8c1494d9001cbd74e44ade6a35f82b5f69a66e1afdc3fa5b91a4c0eb1eb4959b",
+    ("tournament", "maze"): "1379c545f5e6ad6d7aa2e853b63060ea7b08bba2e12aa6976af7d3a42840b3e4",
+    ("tournament", "stripes"): "cc5a85c0ff9e4676836ee70278b668ea2555ac130e75db93865f9f96c5d8f21d",
+    ("tournament", "tower_defense"): "ad590eaf3a52abb0bc16b2fdb606d0b79e9fabafd893925fc7c85c0f21ad8327",
+    ("tournament", "weakhold"): "23adc2c88dca1aa1cfdfe7eabe928733a27c37ab9bbd3d4ee2d0947e7b5e103a",
+}
+
+
+def stamp_map_shas(arena: Arena) -> int:
+    """Gives every game recorded before map versions its map's sha256 (meta.map_sha), so
+    state.current_map can tell games on a since-changed map. Idempotent; run by the engine at
+    start. Repo maps: LEGACY_MAP_SHA. The server's maps change in place (the bridge rewrites a
+    file when the server's copy changes): a game played before its file's last change was on an
+    older version ('older'). Other suites' files never change: their current hash."""
+    from datetime import datetime
+
+    from arena.maps import file_sha
+
+    def ts(at: str) -> float:
+        try:
+            return datetime.fromisoformat(str(at).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+
+    def find(suite: str, stem: str) -> Path | None:
+        if suite == "rotating":
+            base = arena.cfg.data_dir / "maps" / "rotating"
+            hits = sorted(base.glob(f"*/{stem}.map")) if base.exists() else []
+            return hits[-1] if hits else None
+        for d in ([arena.cfg.map_dir(suite)] + ([arena.cfg.map_dir("holdout_custom")] if suite == "holdout" else [])):
+            if d and (d / f"{stem}.map").exists():
+                return d / f"{stem}.map"
+        return None
+
+    n = 0
+    for g in list(arena.games):
+        meta = g.meta if g.meta is not None else {}
+        if "map_sha" in meta or g.lane == "server":
+            continue
+        sha = LEGACY_MAP_SHA.get((g.suite, g.map))
+        if sha is None:
+            p = find(g.suite, g.map)
+            if p is None:
+                sha = "unknown"
+            elif g.suite == "server" and ts(g.played) < p.stat().st_mtime:
+                sha = "older"
+            else:
+                sha = file_sha(p)
+        meta["map_sha"] = sha
+        g.meta = meta
+        arena.save_game(g)
+        n += 1
+    return n

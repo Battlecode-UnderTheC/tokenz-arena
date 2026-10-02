@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field
 
 from arena import scheduler
-from arena.state import ENGINE, Arena, now
+from arena.state import ENGINE, Arena, now, rules
 
 LEASE_SECONDS = 120
 HEARTBEAT_SECONDS = 30
@@ -65,7 +65,7 @@ class Registry:
         raise Refused("a valid worker token is required (Authorization: Bearer ...)", 401)
 
     def _touch(self, name: str, host: str, version: str, slots: int, token: str) -> Worker:
-        if version != ENGINE:
+        if rules(version) != rules(ENGINE):
             raise Refused(f"this arena judges with unswbc {ENGINE}; the worker has {version}", 409)
         with self.lock:
             w = self.workers.get(name)
