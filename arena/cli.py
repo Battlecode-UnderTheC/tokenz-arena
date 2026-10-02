@@ -183,6 +183,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--remove", action="append", default=[], metavar="ID",
                    help="delete this submission first (moved to data_dir/removed/); repeatable")
     p.set_defaults(func=_migrate)
+    p = sub.add_parser("evals", help="the evals service: real games between other teams vs our metrics")
+    p.add_argument("--config")
+    p.add_argument("--import", dest="import_dir", metavar="DIR",
+                   help="store battles crawled earlier (DIR/M<battle>/battle.json + replays) and exit")
+    p.set_defaults(func=lambda a: __import__("arena.evals.collect", fromlist=["main"]).main(a))
     p = sub.add_parser("status", help="the leaderboard in the terminal")
     p.add_argument("--url", default="http://127.0.0.1:8700")
     p.set_defaults(func=_status)

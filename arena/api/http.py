@@ -614,7 +614,8 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
                            f'DEFAULT_ARENA = "{url}"', 1)
 
     for mod, attr in (("arena.web.pages", "router"), ("arena.web.docs", "router"),
-                      ("arena.server.routes", "router"), ("arena.api.workers", "router")):
+                      ("arena.server.routes", "router"), ("arena.api.workers", "router"),
+                      ("arena.evals.web", "router")):
         try:
             m = __import__(mod, fromlist=[attr])
             app.include_router(m.make_router(arena) if hasattr(m, "make_router") else getattr(m, attr))

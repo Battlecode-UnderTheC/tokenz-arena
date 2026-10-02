@@ -10,7 +10,8 @@ from arena.config import ROOT
 from arena.web import markdown
 
 DOCS = {"": ("TEAMMATES.md", "Guide"), "agents": ("AGENTS.md", "Agent brief"),
-        "metrics": ("METRICS.md", "Metrics")}
+        "metrics": ("METRICS.md", "Metrics"),
+        "evals": ("EVALS.md", "Evals")}
 
 EXTRA_CSS = """
 .doc { max-width: 900px; line-height: 1.55; }

@@ -324,6 +324,13 @@ def make_server(app: FastAPI) -> MCPServer:
         board, grow a long dragon, keep its queen?)."""
         return await api.call(ctx, "GET", f"/submissions/{id}/metrics")
 
+    @mcp.tool(annotations=READ)
+    async def evals(ctx: Context, window: str = "all") -> CallToolResult:
+        """How well our in-game metrics predict real games between other teams on the competition
+        server (crawled continuously): the eval's accuracy, AUC, log loss and calibration per round,
+        each metric's AUC, how games end, queen survival, by Elo. window: 24h, 7d or all."""
+        return await api.call(ctx, "GET", "/evals", params={"window": window})
+
     @mcp.tool()
     async def retire(ctx: Context, id: str) -> CallToolResult:
         """Take a submission off the leaderboard (only its owner can): status retired, no longer
@@ -418,7 +425,7 @@ def make_server(app: FastAPI) -> MCPServer:
 
 TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
          "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "retire", "server_link", "lineage", "metrics", "game_metrics",
-         "submission_metrics",
+         "submission_metrics", "evals",
          "queue", "server_status",
          "server_battles",
          "server_battle", "server_leaderboard", "server_quota")

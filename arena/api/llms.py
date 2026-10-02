@@ -127,6 +127,10 @@ GET  /api/v1/games/{{id}}/metrics             a game's metric series for A and B
                                             (P(A wins)) per round
 GET  /api/v1/submissions/{{id}}/metrics       each metric, own side vs opponents, at r50-r400
                                             and the end, averaged over its games
+GET  /api/v1/evals?window=all|7d|24h        our metrics checked against real games between other
+                                            teams (the eval's accuracy, AUC and calibration per
+                                            round, each metric's AUC, endings, queens)
+GET  /api/v1/evals/games/{{id}}               one of those games, with its metrics and replay
 GET  /api/v1/maps                           every public map by suite (official, tournament,
                                             server, custom = team uploads, rotating = this
                                             week's generated maps); hidden uploads only counted
@@ -157,7 +161,7 @@ Tools wrap the endpoints above (same JSON):
   leaderboard()  bot(name)  ideas(q, bot, outcome)  games(sub, vs, map, suite, lane, result,
   limit)  game(id)  map_stats()  maps()  upload_map(text, name, note, hidden)  queue()
   edit_note(id, note)  set_parent(id, parent)  retire(id)  lineage(bot, root)
-  metrics()  game_metrics(id)  submission_metrics(id)
+  metrics()  game_metrics(id)  submission_metrics(id)  evals(window)
   server_link(server_version, arena_id)   (POST /api/v1/server/versions/{{ver}}/link {{"arena": id}})
   server_status()  server_battles(limit)  server_battle(id)  server_leaderboard()
   server_quota()
