@@ -58,7 +58,7 @@ def make(tmp_path):
 
     def make(**over):
         raw = {"scaler": {"dry_run": False, "secrets_dir": str(secrets), "image": "registry.syeyoung.dev/tokenz-arena:latest",
-                          "interruptible": False, **over}}
+                          "interruptible": False, "min_threads": 32, **over}}
         cfg = config.Config(raw=raw, data_dir=tmp_path / "data")
         clock, vast = Clock(), FakeVast()
         s = Scaler(cfg, vast=vast, clock=clock, engine="http://unused")
@@ -72,7 +72,7 @@ def test_rents_for_the_backlog_within_caps(make):
     p = s.tick()
     assert p["needed_slots"] == 50 and p["want_rented"] == 30
     (offer, body), = vast.created
-    assert offer == 2 or offer == 3                    # cheap ones that cover 16+ slots... the cheapest fit
+    assert offer == 1                                  # cheapest per slot: the 256-thread box
     assert body["image"].startswith("registry.syeyoung.dev/") and body["args"] == ["worker"]
     assert body["label"].startswith(LABEL + ":") and body["env"]["TS_AUTHKEY"] == "tskey-auth-x"
     assert body["image_login"] == "-u svc -p s3cret registry.syeyoung.dev"
@@ -152,7 +152,7 @@ def test_interruptible_bids_and_replaces_paused_machines(make):
     s.queue = lambda: queue(left=3000)
     s.tick()
     (offer, body), = vast.created
-    assert body["price"] == round(0.09 * 1.2, 4)                    # the cheapest per slot, bid +20%
+    assert body["price"] == round(0.64 * 1.2, 4)                    # the cheapest per slot, bid +20%
     name = body["env"]["WORKER_NAME"]
     s.queue = lambda: queue(left=3000, remote=[{"name": name, "slots": 18, "running": 3}])
     clock.t += 60
@@ -216,3 +216,11 @@ def test_a_rental_must_fit_under_todays_cap_for_its_minimum_time(make):
     s.queue = lambda: queue(left=3000)
     p = s.tick()
     assert not vast.created and "no offer fits" in p["decision"]
+
+
+def test_prefers_big_machines(make):
+    s, vast, _ = make(min_threads=64)
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    (offer, _), = vast.created
+    assert offer == 1                                  # the 256-thread box, not a stack of small ones

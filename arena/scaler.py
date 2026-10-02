@@ -123,7 +123,8 @@ class Scaler:
         self.max_per_hour = float(g("max_per_hour", 1.0))
         self.max_per_day = float(g("max_per_day", 10.0))
         self.max_instances = int(g("max_instances", 6))
-        self.min_threads = int(g("min_threads", 32))
+        # big machines: each new one pulls the image and compiles every bot it meets, once
+        self.min_threads = int(g("min_threads", 64))
         self.min_reliability = float(g("min_reliability", 0.98))
         self.slots_per_thread = float(g("slots_per_thread", 1.0))      # one game per hardware thread
         self.ram_per_slot = float(g("ram_per_slot_gb", 1.5))
@@ -143,7 +144,7 @@ class Scaler:
         # the worker's own dead-man switch on the rented machine (arena/worker.py self_destroy)
         self.worker_idle_s = float(g("worker_idle_minutes", 30)) * 60
         self.worker_orphan_minutes = float(g("worker_orphan_minutes", 20))
-        self.image = g("image", "registry.syeyoung.dev/undertehc/tokenz-arena:latest")
+        self.image = g("image", "registry.syeyoung.dev/undertehc/tokenz-arena-worker:latest")
         self.arena_url = g("arena_url", "https://tokenz-arena.lonk-kelvin.ts.net")
         self.tz = timezone(timedelta(hours=float(cfg.get("api", "utc_offset_hours", 9))))
         secrets_dir = Path(g("secrets_dir", "/secrets"))
@@ -226,6 +227,8 @@ class Scaler:
     def ranked_offers(self) -> list[dict]:
         out = []
         for o in self.vast.offers(self.query()):
+            if float(o.get("cpu_cores_effective") or 0) < self.min_threads:
+                continue
             slots = self.slots_of(o)
             if slots < 4 or not o.get("dph_total"):
                 continue
@@ -406,9 +409,9 @@ class Scaler:
                   and (self.per_hour() + o["_price"]) * self.min_s / 3600 <= left_today]
         if not offers:
             return f"need {gap} more slots, but no offer fits the ${budget:.2f}/h left under the cap"
-        # cheapest per slot we'd actually use: a 128-slot box for a 30-slot gap pays for 98 idle
-        # slots; one machine per tick, so a bigger gap fills over a few minutes
-        o = min(offers, key=lambda o: (o["_price"] / min(o["_slots"], gap), -o["_slots"]))
+        # cheapest per slot, bigger first on ties: fewer, bigger machines (each new one pays to
+        # pull the image and compile the bots); one per tick, so a big gap fills over minutes
+        o = min(offers, key=lambda o: (round(o["_price"] / o["_slots"], 5), -o["_slots"]))
         what = (f"need {gap} more slots: rent {o.get('cpu_name')} ({o['_slots']} slots, "
                 f"${o['_price']:.3f}/h{' interruptible' if self.interruptible else ''}, {o.get('geolocation')})")
         if self.dry_run:

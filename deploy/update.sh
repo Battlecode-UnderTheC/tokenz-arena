@@ -33,13 +33,18 @@ docker rm -f tokenz-arena-arena-1 >/dev/null 2>&1 || true   # the old single-pro
 docker compose up -d tailscale   # first, so the others have a namespace to join
 docker compose up -d --remove-orphans
 echo "$want" > "$stamp"
-# The worker image rented machines pull (docs/SCALER.md): pushed when the registry login is set
-# up ($ARENA_SECRETS/registry-push: "user password"). A failed push doesn't fail the deploy.
-REG_IMAGE="${REGISTRY_IMAGE:-registry.syeyoung.dev/undertehc/tokenz-arena}"
+# The minimal worker image rented machines pull (docker/worker.Dockerfile, docs/SCALER.md),
+# with the engine's unswbc and wasmtime: built and pushed when the registry login is set up
+# ($ARENA_SECRETS/registry-push: "user password"). A failure doesn't fail the deploy.
+REG_IMAGE="${REGISTRY_IMAGE:-registry.syeyoung.dev/undertehc/tokenz-arena-worker}"
 if [ -f "$ARENA_SECRETS/registry-push" ]; then
   read -r reg_user reg_pass < "$ARENA_SECRETS/registry-push"
-  if printf '%s' "$reg_pass" | docker login "${REG_IMAGE%%/*}" -u "$reg_user" --password-stdin >/dev/null 2>&1 \
-     && docker tag tokenz-arena:latest "$REG_IMAGE:latest" \
+  unswbc_v=$(sed -n 's/.*"unswbc==\([0-9.]*\)".*/\1/p' pyproject.toml | head -1)
+  wasmtime_v=$(awk '/^name = "wasmtime"/{getline; gsub(/[^0-9.]/, ""); print; exit}' uv.lock)
+  if docker build -q -f docker/worker.Dockerfile --build-arg UNSWBC="$unswbc_v" --build-arg WASMTIME="$wasmtime_v" \
+       -t "$REG_IMAGE:latest" . >/dev/null \
+     && docker run --rm --network none --entrypoint arena "$REG_IMAGE:latest" worker --help >/dev/null \
+     && printf '%s' "$reg_pass" | docker login "${REG_IMAGE%%/*}" -u "$reg_user" --password-stdin >/dev/null 2>&1 \
      && docker push -q "$REG_IMAGE:latest" >/dev/null; then
     log "pushed $REG_IMAGE:latest"
   else
