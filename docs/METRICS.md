@@ -26,7 +26,22 @@ From ~8,500 arena games and 258 real competition games under unswbc 1.2.3:
 - **Rounds 400-490: the longest dragon** decides round 500 in ~95% of games that get there.
 - **Queens rarely decide**: both are dead in ~93% of games that reach round 500. But when only one
   survives to the end, that side wins ~98% of the time.
-- **Kills on their own predict nothing**; not dying does.
+- **Kills on their own predict nothing**, and neither does not dying: deaths go slightly *with*
+  winning (bots that split and expand lose more dragons), so they aren't coloured.
+
+**Among the top teams it's different: queens matter.** 667 games from 127 series between other
+teams (mean Elo ~1770), crawled from the competition server on 2026-10-02:
+
+| | top teams | arena / our server games |
+|---|---|---|
+| ended by elimination | 42% | rare |
+| round 500 decided by the queen | 25% (22% with only one queen alive) | ~4% |
+| both queens dead at round 500 | 51% of games reaching it | 92-94% |
+| P(win), only my queen alive at r200 / r300 / r400 / r490 | 75% / 84% / 92% / 99% | |
+
+Queen alive / queen length is the best predictor from round ~300 on (AUC 0.73 at r300, 0.83 at
+r490), board control and dragons alive before that (0.75 at r100). The eval, fitted on arena and
+our server games, is weaker there: it calls 69% of winners at r100 and 90% at r490.
 
 The eval combines dragons (log), board control, longest dragon, queen alive and who leads under
 the round-500 rule, with weights fitted per round (`arena/metrics/plugins/eval.py`). On real

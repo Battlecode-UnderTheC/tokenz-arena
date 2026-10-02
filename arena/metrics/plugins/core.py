@@ -45,13 +45,14 @@ def pearls_eaten(ctx, t):
     return ctx.cum[t]["eat"]
 
 
-@metric("deaths", "Deaths", "own dragons lost so far", unit="dragons", better="lower")
+@metric("deaths", "Deaths", "own dragons lost so far (more deaths go with winning: active bots split and die more)",
+         unit="dragons", better="none")
 def deaths(ctx, t):
     return ctx.cum[t]["deaths"]
 
 
 @metric("deaths_self", "Self-inflicted deaths", "own dragons lost to walls, itself, allies or "
-        "having no valid move", unit="dragons", better="lower")
+        "having no valid move", unit="dragons", better="none")
 def deaths_self(ctx, t):
     return ctx.cum[t]["deaths_self"]
 
