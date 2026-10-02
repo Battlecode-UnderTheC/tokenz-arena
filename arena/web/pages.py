@@ -605,7 +605,7 @@ def make_router(arena: Arena) -> APIRouter:
                     'game (and for older games in the background).</p>')
         cols = [f"r{r}" for r in MV.SUMMARY_ROUNDS] + ["end"]
         order = ["eval", "board_control", "log_dragons", "dragons", "total_length", "longest",
-                 "queen_alive", "queen_length", "queen_room", "queen_danger", "queen_share", "pearls_eaten", "pearl_control", "deaths", "deaths_self",
+                 "queen_alive", "queen_length", "queen_room", "queen_danger", "queen_share", "pearls_eaten", "pearl_rate", "pearl_control", "deaths", "deaths_self",
                  "kills", "splits"]
         names = [k for k in order if k in d["metrics"]] + sorted(k for k in d["metrics"] if k not in order)
         rows = []

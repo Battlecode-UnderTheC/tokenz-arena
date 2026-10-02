@@ -103,12 +103,15 @@ class Ctx:
     g       the map: g.W, g.H, g.step(tile, dir), g.name
     rnd     rounds played so far
     cum     {team: Counter}: eat, deaths, deaths_enemy, deaths_self, lost, splits, kills, paid
+    past    {team: [Counter after round 1, after round 2, ...]}: the counters round by round,
+            for rates (ctx.rate)
     queens  {team: dragon id of its queen}
     cache   a dict shared by all metrics at this round (for expensive things like BFS)
     """
 
-    def __init__(self, st, g, rnd, cum, queens):
+    def __init__(self, st, g, rnd, cum, queens, past=None):
         self.st, self.g, self.rnd, self.cum, self.queens = st, g, rnd, cum, queens
+        self.past = past or {"A": [], "B": []}
         self.cache: dict = {}
 
     @staticmethod
@@ -156,6 +159,15 @@ class Ctx:
             frontier = nxt
         return dist
 
+    def rate(self, team: str, key: str, window: int) -> float:
+        """How much counter `key` grew per round over the last `window` rounds (fewer early on)."""
+        hist = self.past[team]
+        w = min(window, len(hist))
+        if w <= 0:
+            return 0.0
+        before = hist[-w - 1][key] if len(hist) > w else 0
+        return (self.cum[team][key] - before) / w
+
     def head_dist(self, team: str) -> dict:
         """Cached BFS distance from the team's heads (ignoring bodies)."""
         key = ("head_dist", team)
@@ -176,13 +188,14 @@ def compute(blob: bytes, every: int = EVERY) -> dict:
     g = S.GameMap(d["map"])
     queens = {t: i for i, (t, _) in enumerate(g.dragons[:2])}
     cum = {t: collections.Counter() for t in "AB"}
+    past = {t: [] for t in "AB"}
     rounds: list[int] = []
     team_series = {m.name: {"A": [], "B": []} for m in team_metrics}
     game_series = {m.name: [] for m in game_metrics}
     errors: dict[str, str] = {}
 
     def snapshot(st, rnd):
-        ctx = Ctx(st, g, rnd, cum, queens)
+        ctx = Ctx(st, g, rnd, cum, queens, past)
         values = {}
         for m in team_metrics:
             v = {}
@@ -236,6 +249,9 @@ def compute(blob: bytes, every: int = EVERY) -> dict:
         elif kind == "round_end":
             rnd = info + 1
             last_state, last_done = st, rnd
+            for t in "AB":
+                past[t].append(collections.Counter(eat=cum[t]["eat"], deaths=cum[t]["deaths"],
+                                                   kills=cum[t]["kills"], splits=cum[t]["splits"]))
             if rnd % every == 0 or rnd == 1:
                 snapshot(st, rnd)
     if last_state is not None and (not rounds or rounds[-1] != last_done):

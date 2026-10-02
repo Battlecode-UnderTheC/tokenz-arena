@@ -45,6 +45,12 @@ def pearls_eaten(ctx, t):
     return ctx.cum[t]["eat"]
 
 
+@metric("pearl_rate", "Pearl rate", "pearls eaten per round over the last 50 rounds: how fast the "
+        "team farms now (pearls eaten counts the whole game)", unit="pearls/round")
+def pearl_rate(ctx, t):
+    return round(ctx.rate(t, "eat", 50), 4)
+
+
 @metric("deaths", "Deaths", "own dragons lost so far (more deaths go with winning: active bots split and die more)",
          unit="dragons", better="none")
 def deaths(ctx, t):

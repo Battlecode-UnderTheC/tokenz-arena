@@ -79,6 +79,7 @@ It's called for each team at every snapshot round with a `ctx`:
 | `rnd` | rounds played so far |
 | `ids(t)`, `lengths(t)`, `heads(t)`, `queen(t)`, `other(t)` | per-team helpers |
 | `cum[t]` | counters since the start: `eat`, `deaths`, `deaths_enemy`, `deaths_self`, `lost`, `splits`, `kills`, `paid` |
+| `rate(t, key, window)` | how fast a counter (`eat`, `deaths`, `kills`, `splits`) grew per round over the last `window` rounds, e.g. `pearl_rate` = `ctx.rate(t, "eat", 50)` |
 | `occupied()`, `bfs(sources, blocked, limit)`, `head_dist(t)` | spatial helpers (cached per round where it makes sense) |
 | `cache` | a dict shared by all metrics at this round, for anything expensive |
 

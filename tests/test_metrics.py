@@ -60,3 +60,14 @@ def test_submission_summary(tmp_path):
     assert d["games"] == 1
     assert d["metrics"]["dragons"]["at"]["end"] == {"own": 0, "opponents": d["metrics"]["dragons"]["at"]["end"]["opponents"], "games": 1}
     assert d["metrics"]["eval"]["at"]["end"]["own"] == 0          # y-1 was B, and lost
+
+
+def test_pearl_rate_is_pearls_over_the_last_50_rounds():
+    from pathlib import Path
+    from arena import metrics
+    d = metrics.compute((Path(__file__).parent / "data" / "colosseum-seed1.replay").read_bytes())
+    rounds, eaten, rate = d["rounds"], d["team"]["pearls_eaten"]["A"], d["team"]["pearl_rate"]["A"]
+    i, j = rounds.index(68), rounds.index(10)          # 68 - 50 = 18: nothing eaten by then
+    assert eaten[j] == 0 and rate[i] == round(eaten[i] / 50, 4)
+    k = rounds.index(40)                               # fewer than 50 rounds: per round so far
+    assert rate[k] == round(eaten[k] / 40, 4)
