@@ -152,7 +152,8 @@ class Registry:
         return {"a": {"id": j.a, "sha256": subs[j.a].sha256}, "b": {"id": j.b, "sha256": subs[j.b].sha256},
                 "suite": j.suite, "map": {"name": self._map_name(j), "sha256": self.map_sha(j.map)},
                 "seed": j.seed, "lane": j.lane,
-                "timeout": self.arena.cfg.get("play", "game_timeout", 1800)}
+                "timeout": self.arena.cfg.get("play", "game_timeout", 1800),
+                "judge": self.arena.cfg.get("play", "judge", "official")}
 
     @staticmethod
     def _map_name(j: scheduler.Job) -> str:

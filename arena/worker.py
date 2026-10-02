@@ -137,7 +137,8 @@ class Worker:
             work = self.cache / "work"
             work.mkdir(parents=True, exist_ok=True)
             res = self.procs.submit(judge.run_game, str(m), str(a), str(b), int(game["seed"]),
-                                    str(work / "replays"), str(work), float(game.get("timeout", 1800))).result()
+                                    str(work / "replays"), str(work), float(game.get("timeout", 1800)),
+                                    game.get("judge", "official")).result()
             replay = Path(res.pop("replay")) if res.get("replay") else None
         except Exception as e:
             log.exception("lease %s failed", lease)

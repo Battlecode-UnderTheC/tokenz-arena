@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
+
 _WIN = re.compile(r"^team ([AB]) wins after (\d+) rounds \((?:by )?([^)]*)\)", re.M)
 _DRAW = re.compile(r"^(?:draw|it's a draw|tie)\b.*?after (\d+) rounds(?: \(by ([^)]*)\))?", re.M | re.I)
 _DEATH = re.compile(r"^round (\d+): bot (\d+) \(team ([AB])\) died: (.+)$", re.M)
@@ -50,6 +52,7 @@ class GameResult:
     replay: Path | None = None
     seconds: float = 0.0
     log: str = ""               # full stdout+stderr, for stats.py and debugging
+    judge: str = "official"     # which judge played it: "official" or "cpp" (judge/unswbc-cpp)
 
 
 class JudgeError(RuntimeError):
@@ -129,8 +132,19 @@ def prebuild(bot: Path) -> None:
                                            Path(bot).name, type(e).__name__, e)
 
 
+# cppjudge (judge/): the same metered wasm bots and engine, hosted in C++ instead of Python.
+# Its wrapper plays a game with it when it can, and with the official judge otherwise (and says so).
+CPP_WRAPPERS = [ROOT / "judge" / "unswbc-cpp", Path("/opt/cppjudge/unswbc-cpp")]
+CPP_FALLBACK = "unswbc-cpp: official judge"
+
+
+def cpp_wrapper() -> Path | None:
+    return next((w for w in CPP_WRAPPERS if w.is_file()), None)
+
+
 def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
-         work_root: Path | None = None, unswbc: str = "unswbc", timeout: float = 1800) -> GameResult:
+         work_root: Path | None = None, unswbc: str = "unswbc", timeout: float = 1800,
+         judge: str = "official") -> GameResult:
     """Plays bot_a (team A) against bot_b (team B). Raises JudgeError when there's no verdict.
 
     Each bot is copied to <work>/A/<its directory name> and <work>/B/<name>: the judge's wasm
@@ -150,9 +164,15 @@ def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
         shutil.copytree(bot_b, b)
         out = Path(work, "replay")
         # unswbc's CLI, except that a bot dying in its turn isn't asked again (arena/strictjudge.py)
-        judge = [sys.executable, "-m", "arena.strictjudge"] if unswbc == "unswbc" else [unswbc]
-        cmd = [*judge, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
+        wrapper = cpp_wrapper() if judge == "cpp" and unswbc == "unswbc" else None
+        if wrapper:
+            exe = [sys.executable, str(wrapper)]
+        else:
+            exe = [sys.executable, "-m", "arena.strictjudge"] if unswbc == "unswbc" else [unswbc]
+        cmd = [*exe, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
                "-v", "-o", str(out)]
+        if wrapper:
+            cmd.append("--no-retry")
         start = time.monotonic()
         env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}   # plain output to parse
         root = str(Path(__file__).resolve().parent.parent)          # arena.strictjudge, from cwd=work
@@ -165,6 +185,7 @@ def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
         log = proc.stdout + proc.stderr
         result = parse(log)
         result.seconds = time.monotonic() - start
+        result.judge = "cpp" if wrapper and CPP_FALLBACK not in log else "official"
         replays = sorted(out.glob("*.replay"))
         if replays:
             dest = replay_dir / replays[0].name

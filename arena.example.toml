@@ -8,6 +8,9 @@ max_zip_mb = 10
 workers = 6                 # parallel games; set from the measured cost of a 500-round game
 reference_bot = "reference" # rated 1000; a bot submitted at setup
 draft_top_n = 3
+judge = "official"          # "cpp": play wasm bots with cppjudge (judge/), the same bots and engine
+                            # hosted in C++, with the official judge where it can't; each game
+                            # records which judge played it (meta.judge)
 
 [maps]
 official = "<repo>/maps/official"   # <repo> = this checkout

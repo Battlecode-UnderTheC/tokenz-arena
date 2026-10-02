@@ -135,7 +135,8 @@ class Daemon:
         try:
             res = self.procs.submit(judge.run_game, job.map, str(cfg.bots / job.a),
                                     str(cfg.bots / job.b), job.seed, str(cfg.work / "replays"),
-                                    str(cfg.work), cfg.get("play", "game_timeout", 1800)).result()
+                                    str(cfg.work), cfg.get("play", "game_timeout", 1800),
+                                    cfg.get("play", "judge", "official")).result()
         except Exception as e:
             res = {"error": f"internal: {e}"}
             log.error("game %s failed:\n%s", job.key, traceback.format_exc())
@@ -160,6 +161,7 @@ class Daemon:
         else:
             g.winner, g.rounds, g.reason = res["winner"], res["rounds"], res["reason"]
             g.seconds, g.stats = res.get("seconds"), res.get("stats") or {}
+            g.meta["judge"] = res.get("judge", "official")
             if replay is None and res.get("replay"):
                 replay = Path(res["replay"])
         with a.lock:                     # check, store and record in one step: never twice
