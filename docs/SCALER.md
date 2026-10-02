@@ -10,7 +10,8 @@ backlog is gone. Compose service `scaler` (`arena scaler`), its own process. Cod
     needed slots = ceil((games left + running) × average game length / target_minutes)
     rent         = needed slots − our own slots (the engine's judges, poscatgpu1, laptops…)
 
-- **Grow:** rent one machine per minute while the backlog needs more slots: the cheapest per
+- **Grow:** only while more than `start_backlog` (500) games wait: rent one machine per minute
+  while the backlog needs more slots: the cheapest per
   slot, bigger first. Big machines win because each new one pulls the image and compiles every
   bot it meets once. Offers must be verified hosts with reliability ≥ 0.98, ≥ 64 threads, ≥ 1.5 GB RAM per slot,
   ≥ 40 GB disk, and bandwidth ≤ $0.02/GB. Slots = threads (one game per hardware thread), fewer
@@ -56,6 +57,7 @@ like any worker's.
 | `dry_run` | `true` | Decide and report only; rent nothing. `arena scaler --live` overrides. |
 | `interruptible`, `bid_margin`, `paused_minutes` | true, 1.15, 10 | Rent interruptible (bid) machines, bidding the minimum +15%. One that's outbid pauses: it counts as no slots, and after 10 minutes it's returned and replaced. Its games' leases expire and are played elsewhere. |
 | `target_minutes` | 30 | Clear the backlog within this long. |
+| `start_backlog` | 500 | Rent nothing while this many games or fewer wait. |
 | `max_per_hour`, `max_per_day`, `max_instances` | 1.0, 10.0, 6 | Caps. |
 | `idle_minutes`, `min_minutes`, `boot_minutes` | 10, 20, 15 | Shrinking and broken-machine timeouts. |
 | `min_threads`, `min_reliability`, `ram_per_slot_gb`, `disk_gb`, `max_bandwidth_per_gb`, `max_per_slot_hour` | 64, 0.98, 1.5, 40, 0.02, 0.02 | Which offers qualify. |

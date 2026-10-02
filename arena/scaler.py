@@ -117,6 +117,7 @@ class Scaler:
         self.dry_run = bool(g("dry_run", True))
         self.tick_seconds = float(g("tick_seconds", 60))
         self.target_s = float(g("target_minutes", 30)) * 60
+        self.start_backlog = int(g("start_backlog", 500))     # rent only while more games than this wait
         self.idle_s = float(g("idle_minutes", 10)) * 60
         self.min_s = float(g("min_minutes", 20)) * 60
         self.boot_s = float(g("boot_minutes", 15)) * 60
@@ -385,7 +386,9 @@ class Scaler:
                         self.note(self.state["halted"])
                 elif inst.get("paused_t") and t - inst["paused_t"] > self.paused_s:
                     self.retire(name, f"paused (outbid) for {self.paused_s / 60:.0f} min")
-            if p["want_rented"] > p["rented_slots"]:
+            if p["want_rented"] > p["rented_slots"] and p["left"] <= self.start_backlog:
+                decision = f"backlog {p['left']} games (renting starts above {self.start_backlog})"
+            elif p["want_rented"] > p["rented_slots"]:
                 decision = self.grow(p)
             elif p["want_rented"] < p["rented_slots"]:
                 decision = self.shrink(p, t)
