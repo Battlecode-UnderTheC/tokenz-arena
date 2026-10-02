@@ -1,6 +1,10 @@
 """The eval bar: P(team A wins) at each round, from a few metrics (see the analysis in
-docs/METRICS.md). Weights were fitted per round on ~8,500 arena games under unswbc 1.2.3 and
-checked on real competition games (AUC 0.84 at round 100, 0.97 at round 490)."""
+docs/METRICS.md). v2: weights fitted per round on 1,141 games between the competition's top teams,
+435 of our server games and 3,980 arena games (each set weighted equally) under unswbc 1.2.3.
+Out of fold it calls the winner in top-team games 70% of the time at r100, 75% at r300, 81% at
+r400 and 96% at r490 (v1, fitted on arena games only: 70/68/74/89%). Queens weigh about twice as
+much from round 200 on. The extra queen metrics (room, distance to the enemy) added nothing on top
+of whether the queen is alive, so they're shown but not used here."""
 
 import math
 
@@ -8,12 +12,12 @@ from arena.metrics import derived
 
 # round -> weights for Δlog(1+dragons), Δboard control, Δlongest, Δqueen alive, leader now
 WEIGHTS = {
-    10: (1.383, 2.341, 0.020, -0.274, 0.000), 20: (1.198, 1.249, 0.082, -0.298, -0.011),
-    50: (1.941, 1.577, 0.129, 0.146, -0.189), 100: (1.435, 1.532, 0.008, 0.247, 0.060),
-    150: (1.446, 0.869, -0.021, 0.222, 0.055), 200: (1.580, 0.429, -0.005, 0.534, -0.057),
-    250: (1.456, 0.237, 0.024, 0.574, 0.016), 300: (1.145, 0.806, 0.034, 0.857, -0.055),
-    350: (0.837, 0.868, 0.054, 0.904, 0.100), 400: (0.361, 1.366, 0.080, 1.083, 0.273),
-    450: (0.087, 1.249, 0.116, 1.837, 0.448), 490: (-0.071, 0.812, 0.245, 6.148, 0.878),
+    10: (0.417, 1.531, 0.035, 0.213, 0.210), 20: (1.066, 1.947, 0.080, 0.117, 0.172),
+    50: (1.330, 2.178, 0.112, 0.195, 0.155), 100: (1.045, 1.892, 0.098, 0.301, 0.109),
+    150: (0.907, 1.436, 0.047, 0.370, 0.299), 200: (0.766, 1.387, 0.029, 0.750, 0.255),
+    250: (0.622, 1.309, 0.020, 0.818, 0.384), 300: (0.490, 1.402, 0.021, 1.194, 0.339),
+    350: (0.250, 1.943, 0.022, 1.569, 0.336), 400: (0.079, 2.030, 0.030, 1.880, 0.583),
+    450: (-0.150, 1.989, 0.037, 2.243, 1.102), 490: (-0.164, 1.574, 0.045, 3.455, 2.166),
 }
 _KNOTS = sorted(WEIGHTS)
 
@@ -41,7 +45,7 @@ def _leader(v):
 
 
 @derived("eval", "Eval: P(A wins)", "chance team A wins, from dragons alive, board control, "
-         "longest dragon, queen alive and who leads under the round-500 rule", version=1,
+         "longest dragon, queen alive and who leads under the round-500 rule", version=2,
          unit="probability")
 def eval_bar(values, rnd):
     if rnd >= 500:                     # the game is over: the result, not a prediction

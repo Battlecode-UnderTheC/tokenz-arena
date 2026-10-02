@@ -40,12 +40,17 @@ teams (mean Elo ~1770), crawled from the competition server on 2026-10-02:
 | P(win), only my queen alive at r200 / r300 / r400 / r490 | 75% / 84% / 92% / 99% | |
 
 Queen alive / queen length is the best predictor from round ~300 on (AUC 0.73 at r300, 0.83 at
-r490), board control and dragons alive before that (0.75 at r100). The eval, fitted on arena and
-our server games, is weaker there: it calls 69% of winners at r100 and 90% at r490.
+r490), board control and dragons alive before that (0.75 at r100). The eval (v2) is fitted on top-team, server and arena games weighted equally,
+so it gives the queen about twice v1's weight from round 200 on. Out of fold it calls the winner of
+top-team games 70% of the time at r100, 75% at r300, 81% at r400 and 96% at r490 (v1: 70, 68,
+74, 89%); of our server games 72, 76, 77 and 95%.
+
+The queen metrics `queen_room` (free tiles near the queen's head), `queen_danger` (steps from the
+nearest enemy head) and `queen_share` (its share of the team's length) describe how a bot treats its
+queen; they didn't predict the winner any better than whether the queen is alive.
 
 The eval combines dragons (log), board control, longest dragon, queen alive and who leads under
-the round-500 rule, with weights fitted per round (`arena/metrics/plugins/eval.py`). On real
-competition games it calls the winner 73% of the time at round 100 and 95% at round 490.
+the round-500 rule, with weights fitted per round (`arena/metrics/plugins/eval.py`).
 
 ## Adding a metric
 
