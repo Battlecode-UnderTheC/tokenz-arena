@@ -116,7 +116,7 @@ class Scaler:
         g = lambda k, d: cfg.get("scaler", k, d)
         self.dry_run = bool(g("dry_run", True))
         self.tick_seconds = float(g("tick_seconds", 60))
-        self.target_s = float(g("target_minutes", 30)) * 60
+        self.target_s = float(g("target_minutes", 5)) * 60
         self.start_backlog = int(g("start_backlog", 500))     # rent only while more games than this wait
         self.idle_s = float(g("idle_minutes", 10)) * 60
         self.min_s = float(g("min_minutes", 20)) * 60
