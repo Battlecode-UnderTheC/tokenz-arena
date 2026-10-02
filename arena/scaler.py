@@ -312,11 +312,20 @@ class Scaler:
                     self.note(f"couldn't destroy unknown {name}: {e}")
         for name in list(self.state["instances"]):
             if name not in live:
+                inst = self.state["instances"].pop(name)
                 with tokens_file(self.cfg) as d:
                     if name in d:
                         d[name]["revoked"] = True
-                self.state["instances"].pop(name, None)
-                self.note(f"{name} is gone from Vast (ended outside the scaler)")
+                if inst.get("seen_t"):
+                    self.note(f"{name} is gone from Vast (ended outside the scaler)")
+                else:                                  # died before it ever joined: a boot failure
+                    self.state["boot_failures"] += 1
+                    self.note(f"{name} is gone from Vast without ever joining (boot failure "
+                              f"{self.state['boot_failures']} in a row)")
+                    if self.state["boot_failures"] >= self.max_boot_failures:
+                        self.state["halted"] = (f"{self.state['boot_failures']} machines in a row ended before "
+                                                "joining; renting stopped until `arena scaler --resume`")
+                        self.note(self.state["halted"])
             else:
                 inst = self.state["instances"][name]
                 status = live[name].get("actual_status")

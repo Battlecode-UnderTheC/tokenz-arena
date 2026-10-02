@@ -235,3 +235,14 @@ def test_rents_only_above_500_games(make):
     clock.t += 60
     s.tick()
     assert vast.created
+
+
+def test_machines_that_vanish_before_joining_halt_renting(make):
+    s, vast, clock = make(max_boot_failures=2, max_rents_per_hour=10)
+    s.queue = lambda: queue(left=3000)
+    for _ in range(4):                                 # each machine dies right after it's rented
+        s.tick()
+        vast.live.clear()
+        clock.t += 60
+    s.tick()
+    assert len(vast.created) == 2 and "halted" in s.state and "before joining" in s.state["halted"]

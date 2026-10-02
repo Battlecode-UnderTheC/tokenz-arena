@@ -46,6 +46,37 @@ class Worker:
     done: list = field(default_factory=list)     # monotonic times of recorded results
 
 
+_DYN: dict = {}
+
+
+def dynamic_tokens(cfg) -> dict:
+    """data_dir/worker-tokens.json (the scaler's per-instance tokens), re-read when it changes."""
+    p = cfg.data_dir / "worker-tokens.json"
+    try:
+        m = p.stat().st_mtime_ns
+    except FileNotFoundError:
+        m = None
+    hit = _DYN.get(str(p))
+    if not hit or hit[0] != m:
+        hit = _DYN[str(p)] = (m, (store.read_json(p, {}) or {}) if m else {})
+    return hit[1]
+
+
+def token_name(cfg, bearer: str | None) -> str | None:
+    """The name of a valid worker token: [workers] tokens in arena.toml, or the scaler's
+    unrevoked ones. None if it isn't one. The one check every worker route uses."""
+    if not bearer:
+        return None
+    tokens = dict(cfg.get("workers", "tokens", {}) or {})
+    for name, d in dynamic_tokens(cfg).items():
+        if isinstance(d, dict) and d.get("token") and not d.get("revoked"):
+            tokens[name] = d["token"]
+    for name, tok in tokens.items():
+        if secrets.compare_digest(str(tok), bearer):
+            return name
+    return None
+
+
 @contextlib.contextmanager
 def tokens_file(cfg):
     """data_dir/worker-tokens.json under an exclusive lock (the scaler writes it; the engine
@@ -78,34 +109,13 @@ class Registry:
         self.leases: dict[str, dict] = {}            # lease id -> {job, worker, expires}
         self.lease_seconds = int(arena.cfg.get("workers", "lease_seconds", LEASE_SECONDS))
         self._map_sha: dict[str, tuple] = {}
-        self._dyn: dict = {}
-        self._dyn_mtime = None
 
     # ------------------------------------------------------------------ auth and identity
-    def dynamic_tokens(self) -> dict:
-        """data_dir/worker-tokens.json (the scaler's per-instance tokens), re-read on change."""
-        p = self.arena.cfg.data_dir / "worker-tokens.json"
-        try:
-            m = p.stat().st_mtime_ns
-        except FileNotFoundError:
-            m = None
-        if m != self._dyn_mtime:
-            self._dyn = (store.read_json(p, {}) or {}) if m else {}
-            self._dyn_mtime = m
-        return self._dyn
-
-    def untrusted(self, token_name: str | None) -> bool:
-        return bool(token_name) and token_name in self.dynamic_tokens()
-
     def token_name(self, bearer: str | None) -> str:
-        tokens = dict(self.arena.cfg.get("workers", "tokens", {}) or {})
-        for name, d in self.dynamic_tokens().items():
-            if isinstance(d, dict) and d.get("token") and not d.get("revoked"):
-                tokens[name] = d["token"]
-        for name, tok in tokens.items():
-            if bearer and secrets.compare_digest(str(tok), bearer):
-                return name
-        raise Refused("a valid worker token is required (Authorization: Bearer ...)", 401)
+        name = token_name(self.arena.cfg, bearer)
+        if name is None:
+            raise Refused("a valid worker token is required (Authorization: Bearer ...)", 401)
+        return name
 
     def token_of(self, worker: str) -> str | None:
         with self.lock:

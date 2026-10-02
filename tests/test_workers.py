@@ -99,3 +99,20 @@ def test_worker_exits_when_idle(tmp_path, monkeypatch):
     w.last_work -= 1                      # idle for a second already
     w.run()
     assert w.stopping.is_set() and time.monotonic() - t0 < 5
+
+
+def test_scaler_tokens_work_on_every_route_and_revoked_ones_dont(setup):
+    """The routes and the registry share one token check: a rented machine's token from
+    worker-tokens.json leases and downloads; once revoked, it's refused everywhere."""
+    from arena.workers import tokens_file
+    a, d, c, subs = setup
+    with tokens_file(a.cfg) as t:
+        t["vast-x"] = {"token": "rented-token"}
+    h = {"Authorization": "Bearer rented-token"}
+    r = c.post("/api/v1/workers/lease", json=hello(worker="vast-x", want=1), headers=h)
+    assert r.status_code == 200 and r.json()["leases"]
+    assert c.get(f"/api/v1/workers/bot/{subs[0].id}", headers=h).status_code == 200
+    with tokens_file(a.cfg) as t:
+        t["vast-x"]["revoked"] = True
+    assert c.post("/api/v1/workers/lease", json=hello(worker="vast-x"), headers=h).status_code == 401
+    assert c.get(f"/api/v1/workers/bot/{subs[0].id}", headers=h).status_code == 401

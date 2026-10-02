@@ -7,7 +7,6 @@ the engine like every write, and the downloads (bot zips, maps) are served from 
 from __future__ import annotations
 
 import json
-import secrets
 import tempfile
 from pathlib import Path
 
@@ -19,11 +18,13 @@ from arena.state import Arena
 
 
 def token_name(arena: Arena, request: Request) -> str:
+    """The calling worker's token name (arena.toml's tokens or the scaler's), else 401."""
+    from arena import workers as wk
     bearer = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
-    for name, tok in (arena.cfg.get("workers", "tokens", {}) or {}).items():
-        if bearer and secrets.compare_digest(str(tok), bearer):
-            return name
-    raise HTTPException(401, "a valid worker token is required (Authorization: Bearer ...)")
+    name = wk.token_name(arena.cfg, bearer)
+    if name is None:
+        raise HTTPException(401, "a valid worker token is required (Authorization: Bearer ...)")
+    return name
 
 
 def make_router(arena: Arena) -> APIRouter:
