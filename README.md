@@ -15,6 +15,7 @@ To add judge capacity from your own machine, see "Lend your machine" in `docs/TE
 | Path | What |
 |---|---|
 | `arena/runner.py`, `arena/stats.py` | One game with the official judge (`unswbc run --sandbox -v`), and its stats parsed from the log. |
+| `judge/`, `arena/judge_checks.py` | cppjudge: the official judge's games (same wasm bots and engine) hosted in C++, used with `[play] judge = "cpp"`; spot checks against the official judge. `docs/CPPJUDGE.md`. |
 | `arena/strictjudge.py` | The judge as games run it: unswbc's CLI, except a dragon that goes over the CPU cap (100M points a turn) dies, as on the server, instead of being restarted and asked again. |
 | `arena/state.py`, `arena/store.py` | Submissions, bots and games in memory, persisted as JSON files (one per record, atomic writes). No database. |
 | `arena/submit.py` | Accepting a zip: validation, unpacking, checks (no env reads, one sandboxed game). |

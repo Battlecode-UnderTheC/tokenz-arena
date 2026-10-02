@@ -53,6 +53,7 @@ class GameResult:
     seconds: float = 0.0
     log: str = ""               # full stdout+stderr, for stats.py and debugging
     judge: str = "official"     # which judge played it: "official" or "cpp" (judge/unswbc-cpp)
+    check: str | None = None    # a spot check against the official judge: "same" or "different"
 
 
 class JudgeError(RuntimeError):
@@ -144,12 +145,16 @@ def cpp_wrapper() -> Path | None:
 
 def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
          work_root: Path | None = None, unswbc: str = "unswbc", timeout: float = 1800,
-         judge: str = "official") -> GameResult:
+         judge: str = "official", check: bool = False) -> GameResult:
     """Plays bot_a (team A) against bot_b (team B). Raises JudgeError when there's no verdict.
 
     Each bot is copied to <work>/A/<its directory name> and <work>/B/<name>: the judge's wasm
     build cache is keyed by directory name plus source hash, so keeping the name (the
     submission id) means a C/C++ bot compiles once, not once per game (60 s vs 10 s).
+
+    judge "cpp" plays it with cppjudge where it can (result.judge says which judge did). With
+    `check`, a game cppjudge played is played again by the official judge and the two replays
+    compared (result.check "same" or "different"); when they differ, the official one counts.
     """
     map_path, replay_dir = map_path.resolve(), replay_dir.resolve()
     replay_dir.mkdir(parents=True, exist_ok=True)
@@ -162,35 +167,54 @@ def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
         b = Path(work, "B", Path(bot_b).name)
         shutil.copytree(bot_a, a)
         shutil.copytree(bot_b, b)
-        out = Path(work, "replay")
-        # unswbc's CLI, except that a bot dying in its turn isn't asked again (arena/strictjudge.py)
         wrapper = cpp_wrapper() if judge == "cpp" and unswbc == "unswbc" else None
-        if wrapper:
-            exe = [sys.executable, str(wrapper)]
-        else:
-            exe = [sys.executable, "-m", "arena.strictjudge"] if unswbc == "unswbc" else [unswbc]
-        cmd = [*exe, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
-               "-v", "-o", str(out)]
-        if wrapper:
-            cmd.append("--no-retry")
-        start = time.monotonic()
-        env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}   # plain output to parse
-        root = str(Path(__file__).resolve().parent.parent)          # arena.strictjudge, from cwd=work
-        env["PYTHONPATH"] = os.pathsep.join(p for p in (root, env.get("PYTHONPATH")) if p)
-        try:
-            proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout,
-                                  errors="replace", env=env)
-        except subprocess.TimeoutExpired as e:
-            raise JudgeError(f"judge timed out after {timeout:.0f}s", str(e.stdout or "")) from e
-        log = proc.stdout + proc.stderr
-        result = parse(log)
-        result.seconds = time.monotonic() - start
-        result.judge = "cpp" if wrapper and CPP_FALLBACK not in log else "official"
-        replays = sorted(out.glob("*.replay"))
-        if replays:
-            dest = replay_dir / replays[0].name
-            shutil.move(str(replays[0]), dest)
+        result, replay = _judge(map_path, a, b, seed, Path(work, "replay"), work, timeout, unswbc, wrapper)
+        result.judge = "cpp" if wrapper and CPP_FALLBACK not in result.log else "official"
+        if check and result.judge == "cpp":
+            official, official_replay = _judge(map_path, a, b, seed, Path(work, "replay-official"), work,
+                                               timeout, unswbc, None)
+            result.check = "same" if (replay and official_replay
+                                      and _events(replay) == _events(official_replay)) else "different"
+            if result.check == "different":
+                official.judge, official.check = "official", "different"
+                result, replay = official, official_replay
+        if replay:
+            dest = replay_dir / replay.name
+            shutil.move(str(replay), dest)
             result.replay = dest
         else:
             result.replay = None
         return result
+
+
+def _judge(map_path: Path, a: Path, b: Path, seed: int, out: Path, work: str, timeout: float,
+           unswbc: str, wrapper: Path | None) -> tuple[GameResult, Path | None]:
+    """One run of the judge: cppjudge's wrapper, or unswbc's CLI except that a bot dying in its
+    turn isn't asked again (arena/strictjudge.py)."""
+    if wrapper:
+        exe = [sys.executable, str(wrapper)]
+    else:
+        exe = [sys.executable, "-m", "arena.strictjudge"] if unswbc == "unswbc" else [unswbc]
+    cmd = [*exe, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
+           "-v", "-o", str(out)]
+    if wrapper:
+        cmd.append("--no-retry")
+    start = time.monotonic()
+    env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}   # plain output to parse
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(ROOT), env.get("PYTHONPATH")) if p)
+    try:
+        proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout,
+                              errors="replace", env=env)
+    except subprocess.TimeoutExpired as e:
+        raise JudgeError(f"judge timed out after {timeout:.0f}s", str(e.stdout or "")) from e
+    result = parse(proc.stdout + proc.stderr)
+    result.seconds = time.monotonic() - start
+    replays = sorted(out.glob("*.replay"))
+    return result, (replays[0] if replays else None)
+
+
+def _events(replay: Path) -> dict:
+    """A replay minus its header's bot paths: what two judges must agree on."""
+    from arena.metrics import state
+    d = state.load_bytes(replay.read_bytes())
+    return {k: v for k, v in d.items() if k not in ("botA", "botB")}

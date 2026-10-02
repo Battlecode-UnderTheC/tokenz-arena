@@ -582,6 +582,14 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
         """The vast.ai scaler: rented machines, spend today, caps, its last decisions."""
         return store.read_json(arena.cfg.data_dir / "scaler" / "state.json", None) or {"enabled": False}
 
+    @api.get("/judge-checks")
+    def get_judge_checks():
+        """cppjudge spot checks: games it played that the official judge played again, and
+        whether the two agreed ([play] judge = "cpp", judge_check_every)."""
+        from arena import judge_checks
+        return {"judge": arena.cfg.get("play", "judge", "official"),
+                "every": arena.cfg.get("play", "judge_check_every", 50), **judge_checks.read(arena.cfg)}
+
     @api.get("/queue/stream")
     async def queue_stream(request: Request):
         """Server-sent events: a `queue` event with the full view whenever it changes (at

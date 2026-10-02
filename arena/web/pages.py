@@ -1448,6 +1448,7 @@ f.onsubmit = async (ev) => {{
         body = """<h1>Queue <span id="q-live" class="sub">connecting…</span></h1>
 <h2>Judges <span class="sub" id="q-slots"></span></h2><div id="q-judges"></div>
 <p class="sub" id="q-scaler"></p>
+<p class="sub" id="q-checks"></p>
 <p class="sub" id="q-sum"></p>
 <h2>Playing now</h2><div id="q-running"></div>
 <h2>Checking</h2><p id="q-checking"></p>
@@ -1513,6 +1514,17 @@ f.onsubmit = async (ev) => {{
     } catch (e) { /* the scaler is optional */ }
   }
   scaler(); setInterval(scaler, 15000);
+  async function checks() {
+    try {
+      const c = await (await fetch("/api/v1/judge-checks")).json();
+      if (c.judge !== "cpp") { $("q-checks").textContent = ""; return; }
+      const bad = c.differences || [];
+      $("q-checks").innerHTML = `<b>cppjudge</b> plays the games, the official judge re-plays 1 in ${c.every}: `
+        + `${c.same} agreed, ${c.different ? `<b class="L">${c.different} disagreed</b> (the official result counted; last: `
+        + bad.slice(-3).map((d) => esc(d.game)).join(", ") + ")" : "0 disagreed"}`;
+    } catch (e) { /* optional */ }
+  }
+  checks(); setInterval(checks, 30000);
   load().then(stream).catch(() => { status("can't reach the arena", false); setTimeout(() => location.reload(), 5000); });
 })();
 </script>"""

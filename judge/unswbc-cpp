@@ -18,6 +18,19 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 BINARIES = [HERE / "build" / "cppjudge", HERE / "cppjudge", pathlib.Path("/opt/cppjudge/cppjudge")]
+# The unswbc 1.2.7 files cppjudge is a port of (and the engine it hosts). When unswbc changes any
+# of them, games go to the official judge until cppjudge is checked against the new version and
+# these are updated: a stale port must never quietly play by old rules.
+PORTED = {
+    "run.py": "6e24178f6772f06455ce97c637afd46380e9b1b5a8218b1aa782c8a50adefc52",
+    "turn.py": "2150efad3fd75ba6e7efc6dc51b4f89817fada4c1d0e6fd47f055efe8322312c",
+    "sandbox.py": "a318cb556a2b8419e2bf246dbed68a718eb8d6ff24b7189aad3929d169b262fe",
+    "bot.py": "9b7d178c167e42f968ca89a1d0d86d9d151bf63e042f2c63ab2ff9df23f77ac5",
+    "engine.py": "7158bde232f6bf5400e047ed4103451a7e708a0c9f7df9b857b5ad129214b442",
+    "metering.py": "175193a973585d2e10d920b1d0b97c9d4f1577b4050829564be45a6e16fbee8d",
+    "zygote_host.py": "48b8b7bab7f7fdec85ad500dccdb6e242aec1e9ddcc61d16a800b8495d42603c",
+    "unswbc_engine.wasm": "26e68680e45eb0f221db702aead9eefde776c2ad2ba066f4ddf8c12500c6a546",
+}
 FLAGS = {"-v", "--verbose", "--sandbox", "--no-replay", "--no-retry"}
 VALUED = {"-o", "--output", "--replay", "--seed"}
 
@@ -33,6 +46,16 @@ def official(argv: list[str], why: str) -> int:
         from unswbc.cli import main
         return main(argv)
     os.execv(exe, [exe, *argv])
+
+
+def ported() -> bool:
+    """Whether the installed unswbc is the one cppjudge was ported from."""
+    import unswbc
+    here = pathlib.Path(unswbc.__file__).parent
+    try:
+        return all(hashlib.sha256((here / f).read_bytes()).hexdigest() == sha for f, sha in PORTED.items())
+    except OSError:
+        return False
 
 
 def cache_dir() -> pathlib.Path:
@@ -95,6 +118,8 @@ def main(argv: list[str]) -> int:
         i += 1
     if len(positional) != 3 or not pathlib.Path(positional[0]).is_file():
         return official(argv, "not MAP A B")
+    if not ported():
+        return official(argv, "unswbc changed since cppjudge was ported")
     binary = next((b for b in BINARIES if b.is_file()), None)
     if binary is None:
         return official(argv, "no cppjudge binary")

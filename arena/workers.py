@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass, field
 
 from arena import queue, scheduler, store
+from arena.judge import spot_check
 from arena.state import ENGINE, Arena, now, rules
 
 LEASE_SECONDS = 120
@@ -153,7 +154,8 @@ class Registry:
                 "suite": j.suite, "map": {"name": self._map_name(j), "sha256": self.map_sha(j.map)},
                 "seed": j.seed, "lane": j.lane,
                 "timeout": self.arena.cfg.get("play", "game_timeout", 1800),
-                "judge": self.arena.cfg.get("play", "judge", "official")}
+                "judge": self.arena.cfg.get("play", "judge", "official"),
+                "check": spot_check(self.arena.cfg, j.key)}
 
     @staticmethod
     def _map_name(j: scheduler.Job) -> str:

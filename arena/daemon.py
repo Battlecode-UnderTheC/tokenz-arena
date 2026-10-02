@@ -18,7 +18,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
-from arena import judge, queue, rating, scheduler, store, submit
+from arena import judge, judge_checks, queue, rating, scheduler, store, submit
 from arena.state import CHECKING, ENGINE, Arena, Game, now
 
 log = logging.getLogger("arena")
@@ -136,7 +136,8 @@ class Daemon:
             res = self.procs.submit(judge.run_game, job.map, str(cfg.bots / job.a),
                                     str(cfg.bots / job.b), job.seed, str(cfg.work / "replays"),
                                     str(cfg.work), cfg.get("play", "game_timeout", 1800),
-                                    cfg.get("play", "judge", "official")).result()
+                                    cfg.get("play", "judge", "official"),
+                                    judge.spot_check(cfg, job.key)).result()
         except Exception as e:
             res = {"error": f"internal: {e}"}
             log.error("game %s failed:\n%s", job.key, traceback.format_exc())
@@ -162,6 +163,9 @@ class Daemon:
             g.winner, g.rounds, g.reason = res["winner"], res["rounds"], res["reason"]
             g.seconds, g.stats = res.get("seconds"), res.get("stats") or {}
             g.meta["judge"] = res.get("judge", "official")
+            if res.get("judge_check"):
+                g.meta["judge_check"] = res["judge_check"]
+                judge_checks.note(cfg, res["judge_check"], job.key, worker)
             if replay is None and res.get("replay"):
                 replay = Path(res["replay"])
         with a.lock:                     # check, store and record in one step: never twice
