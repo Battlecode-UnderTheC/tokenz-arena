@@ -329,7 +329,7 @@ class Scaler:
             elif p["want_rented"] < p["rented_slots"]:
                 decision = self.shrink(p, t)
         p["decision"] = decision
-        self.save(plan=p)
+        self.save(plan=p, error=None)
         return p
 
     def grow(self, p: dict) -> str:
