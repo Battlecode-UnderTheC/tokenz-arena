@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from arena import report, scheduler, submit, who
 from arena.config import ROOT
-from arena.state import DONE, HIDDEN_SUITES, RATED, REJECTED, Arena, is_rated, result_for, wdl
+from arena.state import DONE, HIDDEN_SUITES, RATED, REJECTED, Arena, current_game, is_rated, result_for, wdl
 from arena.web import viewer
 
 FINAL = {DONE, RATED, REJECTED, "retired"}
@@ -286,13 +286,14 @@ def queue(arena: Arena) -> dict:
         checking = [s.id for s in arena.subs.values() if s.status == "checking"]
     waiting: dict[str, dict] = {}
     for s in list(arena.subs.values()):
-        if s.status in ("queued", "playing", "placing"):
+        # everything the scheduler still owes, ranked bots' background top-ups included
+        if s.status in ("queued", "playing", "placing", "done", "rated"):
             owed = scheduler.owed_for(arena, s)
-            taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games_of(s.id)}
+            taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games_of(s.id) if current_game(g)}
             left = sum(1 for j in owed if j.key not in taken)
             if left:
-                waiting[s.id] = {"owner": s.owner, "lane": s.lane, "games_left": left,
-                                 "games_total": len(owed)}
+                waiting[s.id] = {"owner": s.owner, "lane": s.lane, "status": s.status,
+                                 "games_left": left, "games_total": len(owed)}
     return {"workers": workers_of(arena),
             "running": running, "checking": checking, "waiting": waiting}
 

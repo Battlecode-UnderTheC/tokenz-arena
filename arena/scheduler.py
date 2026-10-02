@@ -268,11 +268,17 @@ def next_jobs(arena: Arena, limit: int) -> list[Job]:
 
 
 def settle(arena: Arena):
-    """Moves submissions whose owed games are all played: draft -> done, placing -> rated."""
+    """Moves submissions whose owed games are all played: draft -> done, placing -> rated; and a
+    done draft back to playing when some of its games stopped counting (a map changed)."""
     with arena.lock:
         taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games if current_game(g)}
         running = set(arena.running)
         for s in arena.subs.values():
+            if s.status == DONE and s.lane == "draft":
+                if any(j.key not in taken for j in owed_for(arena, s)):
+                    s.status = PLAYING
+                    arena.save_sub(s)
+                continue
             if s.status not in (QUEUED, PLAYING, PLACING):
                 continue
             keys = {j.key for j in owed_for(arena, s)}

@@ -1397,10 +1397,12 @@ f.onsubmit = async (ev) => {{
         run = [[sub_link(arena, x["a"]), sub_link(arena, x["b"]), e(x["map"]), e(x["seed"]),
                 e(x["lane"]), e(x["owner"]), e(x.get("worker", "local")), when(x["started"])]
                for x in qd["running"]]
-        wait = [[sub_link(arena, sid), e(w["owner"]), e(w["lane"]), str(w["games_left"]),
+        order = {"draft": 0, "ranked": 1}
+        wait = [[sub_link(arena, sid), e(w["owner"]), e(w["lane"]), e(w.get("status", "")), str(w["games_left"]),
                  str(w["games_total"]),
                  score_bar(100 * (1 - w["games_left"] / w["games_total"])) if w["games_total"] else ""]
-                for sid, w in sorted(qd["waiting"].items())]
+                for sid, w in sorted(qd["waiting"].items(), key=lambda kv: (order.get(kv[1]["lane"], 2), kv[0]))]
+        games_left = sum(w["games_left"] for w in qd["waiting"].values())
         chk = " · ".join(sub_link(arena, x) for x in qd["checking"])
         hb = getattr(arena, "heartbeat", None) or {}
         reg = getattr(arena, "workers", None)
@@ -1415,12 +1417,12 @@ f.onsubmit = async (ev) => {{
 remote workers join with <code>arena worker</code> (docs/WORKERS.md)</span></h2>
 {table(["worker", "host", "slots", "playing", "games last hour", "last seen"], wrows, numeric={2, 3, 4})}
 <p class="sub">{qd["workers"]} judge workers · {len(qd["running"])} games playing ·
-{len(qd["waiting"])} submissions waiting · priority: drafts, placement, holdout, continuous.</p>
+{len(qd["waiting"])} submissions waiting, {games_left} games left · priority: drafts, placement, holdout, continuous.</p>
 <h2>Playing now</h2>
 {table(["seat A", "seat B", "map", "seed", "lane", "owner", "on", "started"], run, numeric={3}, empty="nothing playing")}
 <h2>Checking</h2><p>{chk or '<span class="muted">nothing</span>'}</p>
 <h2>Waiting</h2>
-{table(["submission", "owner", "lane", "games left", "of", "done"], wait, numeric={3, 4}, empty="nothing waiting")}
+{table(["submission", "owner", "lane", "status", "games left", "of", "done"], wait, numeric={4, 5}, empty="nothing waiting")}
 <script>setTimeout(() => location.reload(), 15000)</script>"""
         return layout("Queue", body, "/api/v1/queue", "/queue")
 
