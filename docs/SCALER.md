@@ -38,12 +38,13 @@ like any worker's.
 | key | default | |
 |---|---|---|
 | `dry_run` | `true` | Decide and report only; rent nothing. `arena scaler --live` overrides. |
+| `interruptible`, `bid_margin`, `paused_minutes` | true, 1.15, 10 | Rent interruptible (bid) machines, bidding the minimum +15%. One that's outbid pauses: it counts as no slots, and after 10 minutes it's returned and replaced. Its games' leases expire and are played elsewhere. |
 | `target_minutes` | 30 | Clear the backlog within this long. |
 | `max_per_hour`, `max_per_day`, `max_instances` | 1.0, 10.0, 6 | Caps. |
 | `idle_minutes`, `min_minutes`, `boot_minutes` | 10, 20, 15 | Shrinking and broken-machine timeouts. |
 | `min_threads`, `min_reliability`, `ram_per_slot_gb`, `disk_gb`, `max_bandwidth_per_gb`, `max_per_slot_hour` | 32, 0.98, 1.5, 40, 0.02, 0.02 | Which offers qualify. |
 | `slots_per_thread` | 0.5 | Games per hardware thread. |
-| `image` | `registry.syeyoung.dev/tokenz-arena:latest` | The worker image. |
+| `image` | `registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena:latest` | The worker image, pushed by `deploy/update.sh` on every deploy (`registry-push` holds the read-write login; rented machines get the read-only `registry-login`). |
 | `secrets_dir` | `/secrets` | Holds `vast-key`, `worker-ts-authkey` and `registry-login` (`user password`). |
 
 `arena scaler --once` makes one decision and prints it.

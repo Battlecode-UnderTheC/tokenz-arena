@@ -58,7 +58,7 @@ def make(tmp_path):
 
     def make(**over):
         raw = {"scaler": {"dry_run": False, "secrets_dir": str(secrets), "image": "registry.syeyoung.dev/tokenz-arena:latest",
-                          **over}}
+                          "interruptible": False, **over}}
         cfg = config.Config(raw=raw, data_dir=tmp_path / "data")
         clock, vast = Clock(), FakeVast()
         s = Scaler(cfg, vast=vast, clock=clock, engine="http://unused")
@@ -145,3 +145,24 @@ def test_engine_takes_scaler_tokens_and_refuses_revoked(tmp_path):
         d["vast-abc"]["revoked"] = True
     with pytest.raises(Refused):
         reg.token_name("dyn-token")
+
+
+def test_interruptible_bids_and_replaces_paused_machines(make):
+    s, vast, clock = make(interruptible=True, bid_margin=1.2, paused_minutes=10)
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    (offer, body), = vast.created
+    assert body["price"] == round(0.09 * 1.2, 4)                    # the cheapest per slot, bid +20%
+    name = body["env"]["WORKER_NAME"]
+    s.queue = lambda: queue(left=3000, remote=[{"name": name, "slots": 18, "running": 3}])
+    clock.t += 60
+    s.tick()                                                         # joined
+    iid = s.state["instances"][name]["id"]
+    vast.live[iid]["actual_status"] = "exited"                       # outbid
+    s.queue = lambda: queue(left=3000)
+    clock.t += 60
+    s.tick()
+    assert s.state["instances"][name].get("paused_t")
+    clock.t += 11 * 60
+    s.tick()
+    assert name not in s.state["instances"] and iid in vast.destroyed

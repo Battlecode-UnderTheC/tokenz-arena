@@ -129,7 +129,12 @@ class Scaler:
         self.disk_gb = float(g("disk_gb", 40))
         self.max_bandwidth = float(g("max_bandwidth_per_gb", 0.02))
         self.max_per_slot_hour = float(g("max_per_slot_hour", 0.02))
-        self.image = g("image", "registry.syeyoung.dev/tokenz-arena:latest")
+        # interruptible (bid) machines: much cheaper; outbid ones pause, and one paused for
+        # paused_minutes is returned and replaced
+        self.interruptible = bool(g("interruptible", True))
+        self.bid_margin = float(g("bid_margin", 1.15))
+        self.paused_s = float(g("paused_minutes", 10)) * 60
+        self.image = g("image", "registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena:latest")
         self.arena_url = g("arena_url", "https://tokenz-arena.lonk-kelvin.ts.net")
         self.tz = timezone(timedelta(hours=float(cfg.get("api", "utc_offset_hours", 9))))
         secrets_dir = Path(g("secrets_dir", "/secrets"))
@@ -191,7 +196,15 @@ class Scaler:
                 "reliability2": {"gte": self.min_reliability},
                 "disk_space": {"gte": self.disk_gb},
                 "inet_up_cost": {"lte": self.max_bandwidth}, "inet_down_cost": {"lte": self.max_bandwidth},
-                "type": "on-demand", "order": [["dph_total", "asc"]], "limit": 300}
+                "type": "bid" if self.interruptible else "on-demand",
+                "order": [["dph_total", "asc"]], "limit": 300}
+
+    def price_of(self, offer: dict) -> float:
+        """What we'd pay per hour: on-demand, the offer's price; interruptible, our bid (the
+        minimum bid plus a margin, so a small rise doesn't pause us at once)."""
+        if not self.interruptible:
+            return float(offer["dph_total"])
+        return round(float(offer["dph_total"]) * self.bid_margin, 4)
 
     def slots_of(self, offer: dict) -> int:
         threads = float(offer.get("cpu_cores_effective") or 0)
@@ -204,10 +217,11 @@ class Scaler:
             slots = self.slots_of(o)
             if slots < 4 or not o.get("dph_total"):
                 continue
-            per_slot = o["dph_total"] / slots
+            price = self.price_of(o)
+            per_slot = price / slots
             if per_slot > self.max_per_slot_hour:
                 continue
-            out.append({**o, "_slots": slots, "_per_slot": per_slot})
+            out.append({**o, "_slots": slots, "_per_slot": per_slot, "_price": price})
         out.sort(key=lambda o: o["_per_slot"])
         return out
 
@@ -220,6 +234,8 @@ class Scaler:
                 "runtype": "args", "args": ["worker"],
                 "env": {"ARENA_WORKER_TOKEN": token, "TS_AUTHKEY": _read(self.secrets_dir / "worker-ts-authkey") or "",
                         "ARENA_URL": self.arena_url, "WORKER_NAME": name, "ARENA_SLOTS": str(slots)}}
+        if self.interruptible:
+            body["price"] = offer["_price"]          # our bid, $/hour
         login = _read(self.secrets_dir / "registry-login")
         if login:                                   # "user password" (one line)
             user, _, password = login.partition(" ")
@@ -234,12 +250,14 @@ class Scaler:
             self.note(f"couldn't rent offer {offer.get('id')}: {e}")
             return None
         iid = r.get("new_contract") or r.get("id")
-        inst = {"id": iid, "name": name, "offer": offer.get("id"), "dph": round(offer["dph_total"], 4),
+        inst = {"id": iid, "name": name, "offer": offer.get("id"), "dph": offer["_price"],
+                "interruptible": self.interruptible,
                 "slots": slots, "threads": offer.get("cpu_cores_effective"), "cpu": offer.get("cpu_name"),
                 "where": offer.get("geolocation"), "created": iso(self.clock()), "created_t": self.clock(),
                 "busy_t": self.clock()}
         self.state["instances"][name] = inst
-        self.note(f"rented {name}: {inst['cpu']} ({slots} slots, ${inst['dph']:.3f}/h, {inst['where']})")
+        self.note(f"rented {name}: {inst['cpu']} ({slots} slots, ${inst['dph']:.3f}/h"
+                  f"{' interruptible' if self.interruptible else ''}, {inst['where']})")
         return inst
 
     def retire(self, name: str, why: str):
@@ -280,7 +298,13 @@ class Scaler:
                 self.state["instances"].pop(name, None)
                 self.note(f"{name} is gone from Vast (ended outside the scaler)")
             else:
-                self.state["instances"][name]["status"] = live[name].get("actual_status")
+                inst = self.state["instances"][name]
+                status = live[name].get("actual_status")
+                inst["status"] = status
+                if inst.get("seen_t") and status not in ("running", "loading", None):
+                    inst.setdefault("paused_t", self.clock())      # outbid (interruptible) or stopped
+                else:
+                    inst.pop("paused_t", None)
 
     # ------------------------------------------------------------------ the decision
     def plan(self, q: dict) -> dict:
@@ -294,7 +318,7 @@ class Scaler:
             w.get("slots", 0) for w in remote if w.get("name") not in ours)
         needed = math.ceil((left + running) * avg / self.target_s) if left + running else 0
         want = max(0, needed - own)
-        have = sum(i["slots"] for i in self.state["instances"].values())
+        have = sum(i["slots"] for i in self.state["instances"].values() if not i.get("paused_t"))
         return {"left": left, "running": running, "avg_game_s": avg, "own_slots": own,
                 "needed_slots": needed, "want_rented": want, "rented_slots": have}
 
@@ -320,10 +344,12 @@ class Scaler:
                 self.retire(name, f"daily cap ${self.max_per_day:.2f} reached")
             decision = "daily cap reached"
         else:
-            # boot failures: never showed up as a worker
+            # boot failures: never showed up as a worker; paused too long: outbid
             for name, inst in list(self.state["instances"].items()):
                 if not inst.get("seen_t") and t - inst["created_t"] > self.boot_s:
                     self.retire(name, f"never joined within {self.boot_s / 60:.0f} min")
+                elif inst.get("paused_t") and t - inst["paused_t"] > self.paused_s:
+                    self.retire(name, f"paused (outbid) for {self.paused_s / 60:.0f} min")
             if p["want_rented"] > p["rented_slots"]:
                 decision = self.grow(p)
             elif p["want_rented"] < p["rented_slots"]:
@@ -337,14 +363,14 @@ class Scaler:
             return f"at max instances ({self.max_instances})"
         budget = self.max_per_hour - self.per_hour()
         gap = p["want_rented"] - p["rented_slots"]
-        offers = [o for o in self.ranked_offers() if o["dph_total"] <= budget]
+        offers = [o for o in self.ranked_offers() if o["_price"] <= budget]
         if not offers:
             return f"need {gap} more slots, but no offer fits the ${budget:.2f}/h left under the cap"
         # cheapest per slot we'd actually use: a 128-slot box for a 30-slot gap pays for 98 idle
         # slots; one machine per tick, so a bigger gap fills over a few minutes
-        o = min(offers, key=lambda o: (o["dph_total"] / min(o["_slots"], gap), -o["_slots"]))
+        o = min(offers, key=lambda o: (o["_price"] / min(o["_slots"], gap), -o["_slots"]))
         what = (f"need {gap} more slots: rent {o.get('cpu_name')} ({o['_slots']} slots, "
-                f"${o['dph_total']:.3f}/h, {o.get('geolocation')})")
+                f"${o['_price']:.3f}/h{' interruptible' if self.interruptible else ''}, {o.get('geolocation')})")
         if self.dry_run:
             self.note("[dry run] would " + what.replace(": rent", ": rent"))
             return "[dry run] " + what

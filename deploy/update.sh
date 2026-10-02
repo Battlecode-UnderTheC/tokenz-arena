@@ -33,6 +33,20 @@ docker rm -f tokenz-arena-arena-1 >/dev/null 2>&1 || true   # the old single-pro
 docker compose up -d tailscale   # first, so the others have a namespace to join
 docker compose up -d --remove-orphans
 echo "$want" > "$stamp"
+# The worker image rented machines pull (docs/SCALER.md): pushed when the registry login is set
+# up ($ARENA_SECRETS/registry-push: "user password"). A failed push doesn't fail the deploy.
+REG_IMAGE="${REGISTRY_IMAGE:-registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena}"
+if [ -f "$ARENA_SECRETS/registry-push" ]; then
+  read -r reg_user reg_pass < "$ARENA_SECRETS/registry-push"
+  if printf '%s' "$reg_pass" | docker login "${REG_IMAGE%%/*}" -u "$reg_user" --password-stdin >/dev/null 2>&1 \
+     && docker tag tokenz-arena:latest "$REG_IMAGE:latest" \
+     && docker push -q "$REG_IMAGE:latest" >/dev/null; then
+    log "pushed $REG_IMAGE:latest"
+  else
+    log "push to $REG_IMAGE failed (deploy is fine; rented workers keep the previous image)"
+  fi
+  unset reg_user reg_pass
+fi
 # Remove the image this deploy replaced (only ours: the previous tokenz-arena:latest), so
 # deploys don't pile up images on a Docker shared with other people.
 new=$(docker image inspect tokenz-arena:latest -f '{{.Id}}')
