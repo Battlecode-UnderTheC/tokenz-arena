@@ -26,6 +26,7 @@ State and history: data_dir/scaler/state.json (shown on the Queue page and /api/
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import math
@@ -124,7 +125,7 @@ class Scaler:
         self.max_instances = int(g("max_instances", 6))
         self.min_threads = int(g("min_threads", 32))
         self.min_reliability = float(g("min_reliability", 0.98))
-        self.slots_per_thread = float(g("slots_per_thread", 0.5))
+        self.slots_per_thread = float(g("slots_per_thread", 1.0))      # one game per hardware thread
         self.ram_per_slot = float(g("ram_per_slot_gb", 1.5))
         self.disk_gb = float(g("disk_gb", 40))
         self.max_bandwidth = float(g("max_bandwidth_per_gb", 0.02))
@@ -134,6 +135,14 @@ class Scaler:
         self.interruptible = bool(g("interruptible", True))
         self.bid_margin = float(g("bid_margin", 1.15))
         self.paused_s = float(g("paused_minutes", 10)) * 60
+        # safety: rentals per hour, boot failures in a row before renting stops (until --resume),
+        # and how long the engine may be unreachable before every machine is returned
+        self.max_rents_per_hour = int(g("max_rents_per_hour", 4))
+        self.max_boot_failures = int(g("max_boot_failures", 2))
+        self.engine_down_s = float(g("engine_down_minutes", 10)) * 60
+        # the worker's own dead-man switch on the rented machine (arena/worker.py self_destroy)
+        self.worker_idle_s = float(g("worker_idle_minutes", 30)) * 60
+        self.worker_orphan_minutes = float(g("worker_orphan_minutes", 20))
         self.image = g("image", "registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena:latest")
         self.arena_url = g("arena_url", "https://tokenz-arena.lonk-kelvin.ts.net")
         self.tz = timezone(timedelta(hours=float(cfg.get("api", "utc_offset_hours", 9))))
@@ -149,7 +158,8 @@ class Scaler:
         self.state.setdefault("spend", {})
         self.state.setdefault("log", [])
         self.state.setdefault("paused", False)
-        self._last_tick = None
+        self.state.setdefault("rents", [])
+        self.state.setdefault("boot_failures", 0)
 
     # ------------------------------------------------------------------ bookkeeping
     def today(self) -> str:
@@ -174,15 +184,17 @@ class Scaler:
         store.write_json(self.path, self.state)
 
     def account(self):
-        """Adds what the rented machines cost since the last tick to today's spend."""
+        """Adds what the rented machines cost since the last tick to today's spend. The last
+        tick's time is saved, so time the scaler was down (machines still billing) counts too."""
         t = self.clock()
-        if self._last_tick is not None:
-            hours = (t - self._last_tick) / 3600
+        last = self.state.get("tick_t")
+        if last is not None and t > last:
+            hours = (t - last) / 3600
             day = self.today()
             self.state["spend"][day] = self.spent_today() + self.per_hour() * hours
             for k in sorted(self.state["spend"])[:-14]:
                 self.state["spend"].pop(k, None)
-        self._last_tick = t
+        self.state["tick_t"] = t
 
     # ------------------------------------------------------------------ the engine
     def queue(self) -> dict:
@@ -233,7 +245,10 @@ class Scaler:
         body = {"client_id": "me", "image": self.image, "disk": self.disk_gb, "label": f"{LABEL}:{name}",
                 "runtype": "args", "args": ["worker"],
                 "env": {"ARENA_WORKER_TOKEN": token, "TS_AUTHKEY": _read(self.secrets_dir / "worker-ts-authkey") or "",
-                        "ARENA_URL": self.arena_url, "WORKER_NAME": name, "ARENA_SLOTS": str(slots)}}
+                        "ARENA_URL": self.arena_url, "WORKER_NAME": name, "ARENA_SLOTS": str(slots),
+                        # the machine destroys itself if the worker stops: idle, no arena, revoked
+                        "ARENA_SELF_DESTROY": "1", "ARENA_IDLE_EXIT": str(int(self.worker_idle_s)),
+                        "ARENA_ORPHAN_MINUTES": str(self.worker_orphan_minutes)}}
         if self.interruptible:
             body["price"] = offer["_price"]          # our bid, $/hour
         login = _read(self.secrets_dir / "registry-login")
@@ -249,6 +264,7 @@ class Scaler:
                 d.pop(name, None)
             self.note(f"couldn't rent offer {offer.get('id')}: {e}")
             return None
+        self.state["rents"] = [x for x in self.state["rents"] if self.clock() - x < 3600] + [self.clock()]
         iid = r.get("new_contract") or r.get("id")
         inst = {"id": iid, "name": name, "offer": offer.get("id"), "dph": offer["_price"],
                 "interruptible": self.interruptible,
@@ -326,13 +342,24 @@ class Scaler:
         if not self.dry_run:
             self.reconcile()
         self.account()
-        q = self.queue()
-        p = self.plan(q)
         t = self.clock()
+        try:
+            q = self.queue()
+            self.state["queue_ok_t"] = t
+        except Exception as e:
+            down = t - self.state.get("queue_ok_t", t)
+            if down > self.engine_down_s and self.state["instances"] and not self.dry_run:
+                for name in list(self.state["instances"]):
+                    self.retire(name, f"the engine has been unreachable for {down / 60:.0f} min")
+            self.save(error=f"engine unreachable: {e}"[:300])
+            return {"decision": "engine unreachable"}
+        p = self.plan(q)
         busy = {w["name"]: w for w in (q.get("remote") or [])}
         for name, inst in self.state["instances"].items():
             w = busy.get(name)
             if w is not None:
+                if not inst.get("seen_t"):
+                    self.state["boot_failures"] = 0
                 inst["seen_t"] = t
                 if w.get("running"):
                     inst["busy_t"] = t
@@ -348,6 +375,11 @@ class Scaler:
             for name, inst in list(self.state["instances"].items()):
                 if not inst.get("seen_t") and t - inst["created_t"] > self.boot_s:
                     self.retire(name, f"never joined within {self.boot_s / 60:.0f} min")
+                    self.state["boot_failures"] += 1
+                    if self.state["boot_failures"] >= self.max_boot_failures:
+                        self.state["halted"] = (f"{self.state['boot_failures']} machines in a row never joined; "
+                                                "renting stopped until `arena scaler --resume`")
+                        self.note(self.state["halted"])
                 elif inst.get("paused_t") and t - inst["paused_t"] > self.paused_s:
                     self.retire(name, f"paused (outbid) for {self.paused_s / 60:.0f} min")
             if p["want_rented"] > p["rented_slots"]:
@@ -359,11 +391,19 @@ class Scaler:
         return p
 
     def grow(self, p: dict) -> str:
+        if self.state.get("halted"):
+            return "halted: " + self.state["halted"]
         if len(self.state["instances"]) >= self.max_instances:
             return f"at max instances ({self.max_instances})"
+        recent = [x for x in self.state["rents"] if self.clock() - x < 3600]
+        if len(recent) >= self.max_rents_per_hour:
+            return f"rented {len(recent)} machines in the last hour (the limit); waiting"
         budget = self.max_per_hour - self.per_hour()
         gap = p["want_rented"] - p["rented_slots"]
-        offers = [o for o in self.ranked_offers() if o["_price"] <= budget]
+        # a new machine runs at least min_minutes: that must fit under today's cap too
+        left_today = self.max_per_day - self.spent_today()
+        offers = [o for o in self.ranked_offers() if o["_price"] <= budget
+                  and (self.per_hour() + o["_price"]) * self.min_s / 3600 <= left_today]
         if not offers:
             return f"need {gap} more slots, but no offer fits the ${budget:.2f}/h left under the cap"
         # cheapest per slot we'd actually use: a 128-slot box for a 30-slot gap pays for 98 idle
@@ -413,7 +453,21 @@ def main(args) -> int:
     from arena import config
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     cfg = config.load(Path(args.config) if args.config else None)
+    lock_path = cfg.data_dir / "scaler" / ".lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(lock_path, "a+")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)       # one scaler at a time
+    except OSError:
+        raise SystemExit("another scaler is running (data/scaler/.lock)")
     s = Scaler(cfg)
+    if getattr(args, "resume", False):
+        s.state.pop("halted", None)
+        s.state["boot_failures"] = 0
+        s.note("resumed by hand")
+        s.save()
+        print("resumed")
+        return 0
     if getattr(args, "live", False):
         s.dry_run = False
     if getattr(args, "once", False):

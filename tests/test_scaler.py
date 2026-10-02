@@ -166,3 +166,53 @@ def test_interruptible_bids_and_replaces_paused_machines(make):
     clock.t += 11 * 60
     s.tick()
     assert name not in s.state["instances"] and iid in vast.destroyed
+
+
+def test_engine_down_returns_everything(make):
+    s, vast, clock = make(engine_down_minutes=10)
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    assert s.state["instances"]
+
+    def down():
+        raise OSError("connection refused")
+    s.queue = down
+    clock.t += 5 * 60
+    assert s.tick()["decision"] == "engine unreachable" and s.state["instances"]   # not yet
+    clock.t += 6 * 60
+    s.tick()
+    assert not s.state["instances"] and vast.destroyed
+
+
+def test_boot_failures_halt_renting_and_rents_are_rate_limited(make):
+    s, vast, clock = make(boot_minutes=15, max_boot_failures=2, max_rents_per_hour=3, max_instances=6)
+    s.queue = lambda: queue(left=3000)                 # machines never show up as workers
+    for _ in range(40):
+        clock.t += 60
+        s.tick()
+    assert len(vast.created) <= 3 + 1                  # at most 3 an hour (40 min here, plus the first)
+    assert s.state.get("halted") and "never joined" in s.state["halted"]
+    n = len(vast.created)
+    clock.t += 2 * 3600
+    s.tick()
+    assert len(vast.created) == n                      # halted: no more rentals
+
+
+def test_spend_counts_while_the_scaler_was_down(make, tmp_path):
+    s, vast, clock = make()
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    rate = s.per_hour()
+    s.save()
+    clock.t += 2 * 3600                                # the scaler was down for two hours
+    s2 = Scaler(s.cfg, vast=vast, clock=clock, engine="http://unused")
+    s2.queue = lambda: queue(left=3000)
+    s2.tick()
+    assert s2.spent_today() == pytest.approx(rate * 2, rel=0.01)
+
+
+def test_a_rental_must_fit_under_todays_cap_for_its_minimum_time(make):
+    s, vast, clock = make(max_per_day=0.02, min_minutes=20)      # 20 min of any offer > $0.02
+    s.queue = lambda: queue(left=3000)
+    p = s.tick()
+    assert not vast.created and "no offer fits" in p["decision"]

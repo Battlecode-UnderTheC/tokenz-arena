@@ -200,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config")
     p.add_argument("--live", action="store_true", help="really rent (default: [scaler] dry_run, true)")
     p.add_argument("--once", action="store_true", help="one decision, printed, then exit")
+    p.add_argument("--resume", action="store_true", help="clear a halt (after repeated boot failures)")
     p.set_defaults(func=lambda a: __import__("arena.scaler", fromlist=["main"]).main(a))
     p = sub.add_parser("status", help="the leaderboard in the terminal")
     p.add_argument("--url", default="http://127.0.0.1:8700")

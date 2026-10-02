@@ -45,6 +45,8 @@ class Worker:
         self.fetch_lock = threading.Lock()
         self.idle_exit = idle_exit                 # exit after this long with nothing to do (0: never)
         self.last_work = time.monotonic()
+        self.last_contact = time.monotonic()       # the arena last answered
+        self.orphan_after = 0.0                    # exit after this long without the arena (0: never)
 
     # ------------------------------------------------------------------ http
     def _req(self, method: str, path: str, body: bytes | None = None, ctype: str | None = None,
@@ -136,6 +138,7 @@ class Worker:
                 leases = list(self.active)
             try:
                 self._json("/api/v1/workers/heartbeat", {**self._hello(), "leases": leases})
+                self.last_contact = time.monotonic()
             except Exception as e:
                 log.warning("heartbeat failed: %s", e)
 
@@ -155,13 +158,20 @@ class Worker:
                 detail = e.read().decode(errors="replace")[:300]
                 log.error("lease refused: HTTP %s %s", e.code, detail)
                 if e.code in (401, 409):
-                    raise SystemExit(f"worker refused: {detail}")
+                    log.error("worker refused (token revoked or wrong judge): stopping")
+                    self.stopping.set()
+                    break
                 time.sleep(15)
                 continue
             except Exception as e:
                 log.warning("can't reach the arena: %s", e)
+                if self.orphan_after and time.monotonic() - self.last_contact > self.orphan_after:
+                    log.error("no arena for %ds: stopping", self.orphan_after)
+                    self.stopping.set()
+                    break
                 time.sleep(15)
                 continue
+            self.last_contact = time.monotonic()
             self.heartbeat_seconds = out.get("heartbeat_seconds", 30)
             leases = out.get("leases") or []
             for l in leases:
@@ -193,7 +203,32 @@ def main(args) -> int:
     idle = args.idle_exit if args.idle_exit is not None else float(env("ARENA_IDLE_EXIT") or 0)
     w = Worker(arena, token, args.name or env("WORKER_NAME") or socket.gethostname(), slots,
                Path(args.cache or env("ARENA_CACHE") or "~/.cache/tokenz-arena-worker").expanduser(), idle)
+    w.orphan_after = float(env("ARENA_ORPHAN_MINUTES") or 0) * 60
     signal.signal(signal.SIGTERM, lambda *_: w.stopping.set())
     signal.signal(signal.SIGINT, lambda *_: w.stopping.set())
-    w.run()
+    try:
+        w.run()
+    finally:
+        if env("ARENA_SELF_DESTROY") == "1":
+            self_destroy(env("CONTAINER_ID"), env("CONTAINER_API_KEY"))
     return 0
+
+
+def self_destroy(instance: str | None, key: str | None):
+    """On a rented vast.ai machine (docs/SCALER.md): when the worker stops for any reason (idle,
+    no arena, token revoked), destroy this instance so it stops billing even if the scaler is
+    down. Vast gives every container its own id and an API key for itself."""
+    if not instance or not key:
+        log.error("self-destroy asked for, but CONTAINER_ID / CONTAINER_API_KEY aren't set")
+        return
+    req = urllib.request.Request(f"https://console.vast.ai/api/v0/instances/{int(instance)}/", method="DELETE",
+                                 data=b"{}", headers={"Authorization": f"Bearer {key}",
+                                                     "Content-Type": "application/json"})
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                log.info("destroyed this instance (%s): %s", instance, r.read()[:200].decode(errors="replace"))
+                return
+        except Exception as e:
+            log.error("self-destroy attempt %d failed: %s", attempt + 1, e)
+            time.sleep(10)

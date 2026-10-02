@@ -13,7 +13,8 @@ backlog is gone. Compose service `scaler` (`arena scaler`), its own process. Cod
 - **Grow:** rent one machine per minute while the backlog needs more slots. It picks the cheapest
   offer per slot it would actually use: a 128-slot box for a 30-slot gap pays for 98 idle slots.
   Offers must be verified hosts with reliability ≥ 0.98, ≥ 32 threads, ≥ 1.5 GB RAM per slot,
-  ≥ 40 GB disk, and bandwidth ≤ $0.02/GB. Slots = threads ÷ 2 (one game per physical core).
+  ≥ 40 GB disk, and bandwidth ≤ $0.02/GB. Slots = threads (one game per hardware thread), fewer
+  if the machine has under 1.5 GB of RAM per thread.
 - **Shrink:** return a machine when the backlog no longer needs it, it has had no game for
   `idle_minutes` (10), and it's been up at least `min_minutes` (20).
 - **Never past the caps:** `max_per_hour` ($1), `max_per_day` ($10; at the cap everything is
@@ -21,6 +22,21 @@ backlog is gone. Compose service `scaler` (`arena scaler`), its own process. Cod
 - **Broken machines:** one that never joins within `boot_minutes` (15) is returned.
 - **Housekeeping:** instances are labelled `tokenz-worker:<name>`. A labelled instance the scaler
   doesn't know (left over from a crash) is destroyed; one destroyed outside the scaler is forgotten.
+
+## Spending limits, and what happens when things break
+
+| Guard | How |
+|---|---|
+| **$/hour** | Before renting, the sum of what's rented (on-demand price, or our bid) plus the new machine must be ≤ `max_per_hour`. Interruptible machines never cost more than our bid. |
+| **$/day** | Spend is added up every minute from those prices (saved, so time the scaler was down counts too). A new machine must fit under today's cap for its minimum time; at the cap everything is returned. Days are KST. |
+| **Machines** | At most `max_instances`, and at most `max_rents_per_hour` (4) rentals an hour, so a bad host can't make it churn. |
+| **Machines that never join** | Returned after `boot_minutes`; after `max_boot_failures` (2) in a row, renting stops until `arena scaler --resume` (an image or registry problem shouldn't burn money). |
+| **Engine down** | Unreachable for `engine_down_minutes` (10): every machine is returned. |
+| **Scaler down** | Each rented worker destroys its own instance (Vast gives every container an API key for itself) when it stops: idle for 30 minutes, no arena for 20, or its token revoked. |
+| **Leftovers** | Labelled instances the scaler doesn't know are destroyed; only one scaler runs at a time (a lock). |
+| **The last line** | Vast bills a prepaid balance: with auto-recharge off, nothing can spend more than the credit. |
+
+Not counted: disk (a few cents a day) and bandwidth (~$0.004/GB, ~0.5 MB per game).
 
 Each machine gets its own worker token in `data/worker-tokens.json`, revoked when it's returned,
 plus the workers' Tailscale key (which can only reach `tokenz-arena:443`). Their results count
@@ -43,8 +59,10 @@ like any worker's.
 | `max_per_hour`, `max_per_day`, `max_instances` | 1.0, 10.0, 6 | Caps. |
 | `idle_minutes`, `min_minutes`, `boot_minutes` | 10, 20, 15 | Shrinking and broken-machine timeouts. |
 | `min_threads`, `min_reliability`, `ram_per_slot_gb`, `disk_gb`, `max_bandwidth_per_gb`, `max_per_slot_hour` | 32, 0.98, 1.5, 40, 0.02, 0.02 | Which offers qualify. |
-| `slots_per_thread` | 0.5 | Games per hardware thread. |
+| `slots_per_thread` | 1.0 | Games per hardware thread. |
 | `image` | `registry.syeyoung.dev/underthec-serviceaccount/tokenz-arena:latest` | The worker image, pushed by `deploy/update.sh` on every deploy (`registry-push` holds the read-write login; rented machines get the read-only `registry-login`). |
+| `max_rents_per_hour`, `max_boot_failures`, `engine_down_minutes` | 4, 2, 10 | Safety limits (above). |
+| `worker_idle_minutes`, `worker_orphan_minutes` | 30, 20 | When a rented worker destroys its own instance. |
 | `secrets_dir` | `/secrets` | Holds `vast-key`, `worker-ts-authkey` and `registry-login` (`user password`). |
 
 `arena scaler --once` makes one decision and prints it.
