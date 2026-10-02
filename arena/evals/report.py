@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 
 EVAL_ROUNDS = tuple(range(10, 500, 10))
 SHOW = (50, 100, 200, 300, 400, 490)
-WINDOWS = (("24h", 86400), ("7d", 7 * 86400), ("all", None))
+H = 3600
+WINDOWS = (("5h", 5 * H), ("12h", 12 * H), ("1d", 24 * H), ("3d", 72 * H), ("all", None))
 PHASES = (("early", 10, 150), ("mid", 160, 350), ("late", 360, 490))
 ELO = (("1900+", 1900, 10 ** 6), ("1700-1899", 1700, 1900), ("under 1700", -10 ** 6, 1700))
 

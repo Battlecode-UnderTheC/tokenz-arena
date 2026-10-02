@@ -127,7 +127,7 @@ GET  /api/v1/games/{{id}}/metrics             a game's metric series for A and B
                                             (P(A wins)) per round
 GET  /api/v1/submissions/{{id}}/metrics       each metric, own side vs opponents, at r50-r400
                                             and the end, averaged over its games
-GET  /api/v1/evals?window=all|7d|24h        our metrics checked against real games between other
+GET  /api/v1/evals?window=5h|12h|1d|3d|all  our metrics checked against real games between other
                                             teams (the eval's accuracy, AUC and calibration per
                                             round, each metric's AUC, endings, queens)
 GET  /api/v1/evals/games/{{id}}               one of those games, with its metrics and replay

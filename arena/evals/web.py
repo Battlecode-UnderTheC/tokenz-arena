@@ -140,7 +140,7 @@ def make_router(arena) -> APIRouter:
     def evals_report(window: str | None = None):
         """The evals report: how well the eval and each metric predicted real games between other
         teams (per round: accuracy, log loss, Brier, AUC; calibration; metric AUCs; endings;
-        queens; Elo brackets), for the windows 24h, 7d and all. `window` picks one."""
+        queens; Elo brackets), for the windows 5h, 12h, 1d, 3d and all (the game moves fast, so drift shows in hours). `window` picks one."""
         rep = files.read("report.json")
         if rep is None:
             raise HTTPException(404, "no evals report yet (is the evals service running?)")
@@ -176,7 +176,7 @@ def make_router(arena) -> APIRouter:
 
     # ------------------------------------------------------------ pages
     @r.get("/evals", response_class=HTMLResponse, include_in_schema=False)
-    def evals_page(w: str = "all"):
+    def evals_page(w: str = "1d"):
         rep = files.read("report.json")
         st = files.read("status.json") or {}
         status = (f'<p class="muted">collector: last poll {local_time(st.get("last_poll"))}, every '
@@ -191,7 +191,7 @@ def make_router(arena) -> APIRouter:
         if not rep:
             return layout("Evals", f"<style>{CSS}</style>{intro}{status}", "/api/v1/evals", "/evals")
         if w not in rep["windows"]:
-            w = "all"
+            w = "1d" if "1d" in rep["windows"] else "all"
         W = rep["windows"][w]
         tabs = '<p class="tabs">' + "".join(
             f'<a class="{"on" if k == w else ""}" href="/evals?w={k}">{k}</a>' for k in rep["windows"]) + "</p>"
@@ -240,7 +240,18 @@ def make_router(arena) -> APIRouter:
                 + [f'<a href="/evals/games/{g["id"]}">watch</a>'])
         recent = table(["finished", "A vs B", "map", "winner", "how", "rounds", "eval r100", "r300", "r490", ""],
                        recent_rows, numeric={5, 6, 7, 8})
-        body = (f"<style>{CSS}</style>{intro}{status}{tabs}{summary}"
+        drift_rows = []
+        for k, X in rep["windows"].items():
+            er = {x["round"]: x for x in X["eval"]}
+            drift_rows.append([f'<a href="/evals?w={k}">{e(k)}</a>', e(X["eval_games"])]
+                              + [pct(er.get(rr, {}).get("acc")) for rr in (100, 200, 300, 400, 490)]
+                              + [num(er.get(100, {}).get("auc"), 2), num(er.get(300, {}).get("auc"), 2)])
+        drift = table(["window", "games", "acc r100", "r200", "r300", "r400", "r490", "AUC r100", "AUC r300"],
+                      drift_rows, numeric={1, 2, 3, 4, 5, 6, 7, 8})
+        body = (f"<style>{CSS}</style>{intro}{status}"
+                f'<h2>Across windows <span class="sub">the eval on the most recent games: '
+                f'a drop in the short windows means the top teams changed how they play</span></h2>{drift}'
+                f"<h2>Window {e(w)}</h2>{tabs}{summary}"
                 f"<h2>Does the eval pick the winner?</h2>{key}{chart}{eval_tbl}"
                 f'<h2>Calibration <span class="sub">when the eval says x%, does A win x% of the time? '
                 f'(dot size: games)</span></h2>{cal}'

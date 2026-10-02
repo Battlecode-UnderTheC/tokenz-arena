@@ -2,7 +2,7 @@
 
 The arena's metrics (see Metrics) are fitted on games we have. **Evals** keeps checking them against
 games we didn't fit on: finished battles between *other* teams on the competition server,
-downloaded as they happen. Page: **/evals**. API: `GET /api/v1/evals?window=all|7d|24h`. MCP:
+downloaded as they happen. Page: **/evals**. API: `GET /api/v1/evals?window=5h|12h|1d|3d|all`. MCP:
 `evals(window)`.
 
 ## What the page shows
@@ -16,8 +16,9 @@ downloaded as they happen. Page: **/evals**. API: `GET /api/v1/evals?window=all|
 | By strength | Eval accuracy by the weaker team's Elo. |
 | Latest games | Each one opens in the viewer with the eval bar and all metrics. |
 
-The 24h and 7d windows show drift: when the top teams change how they play, the eval's numbers
-there move first.
+Windows: 5h, 12h, 1d (the default), 3d and all. The game moves fast, so the page opens with
+**Across windows**: the eval's accuracy and AUC in every window side by side. When the top teams
+change how they play, the short windows drop first.
 
 ## How it runs
 

@@ -132,11 +132,11 @@ def test_pages(cfg):
     client = TestClient(create_app(Arena(cfg)))
     html = client.get("/evals").text
     assert "Does the eval pick the winner?" in html and "Beta" in html and "/evals/games/1001" in html
-    assert "Does the eval" in client.get("/evals?w=24h").text
+    assert "Does the eval" in client.get("/evals?w=5h").text
     v = client.get("/evals/games/1001").text
     assert "/api/v1/evals/games/1001/replay" in v and "Beta" in v
     assert client.get("/api/v1/evals/games/1001/replay").content[:4] == REPLAY[:4]
-    assert client.get("/api/v1/evals?window=7d").json()["windows"].keys() == {"7d"}
+    assert client.get("/api/v1/evals?window=12h").json()["windows"].keys() == {"12h"}
     assert client.get("/api/v1/evals?window=bad").status_code == 400
     assert client.get("/api/v1/evals/status").json()["games"] == 2
     assert client.get("/evals/games/999").status_code == 404

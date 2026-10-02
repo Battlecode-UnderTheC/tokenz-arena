@@ -325,10 +325,10 @@ def make_server(app: FastAPI) -> MCPServer:
         return await api.call(ctx, "GET", f"/submissions/{id}/metrics")
 
     @mcp.tool(annotations=READ)
-    async def evals(ctx: Context, window: str = "all") -> CallToolResult:
+    async def evals(ctx: Context, window: str = "1d") -> CallToolResult:
         """How well our in-game metrics predict real games between other teams on the competition
         server (crawled continuously): the eval's accuracy, AUC, log loss and calibration per round,
-        each metric's AUC, how games end, queen survival, by Elo. window: 24h, 7d or all."""
+        each metric's AUC, how games end, queen survival, by Elo. window: 5h, 12h, 1d, 3d or all."""
         return await api.call(ctx, "GET", "/evals", params={"window": window})
 
     @mcp.tool()
