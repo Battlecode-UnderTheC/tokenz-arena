@@ -100,3 +100,26 @@ def test_engine_serves_builds_to_workers(fake_clang, tmp_path):
     assert r.status_code == 200 and r.content == b"\0asm-fake"
     assert r.headers["x-wasm-name"] == runner.wasm_path(cfg.bots / "cxx-9").name
     assert c.get("/api/v1/workers/wasm/nope", headers={"Authorization": "Bearer s3cret"}).status_code == 404
+
+
+def test_a_submission_compiles_before_it_is_queued(fake_clang, tmp_path, monkeypatch):
+    from arena import config, submit
+    from arena.state import Arena
+    from tests.test_core import make_zip
+    cfg = config.Config(raw={"maps": {"worldgen": False}}, data_dir=tmp_path / "d")
+    a = Arena(cfg)
+    zipped = make_zip({"bot.toml": '[project]\nlanguage = "c++"\n', "main.cpp": "int main(){}"})
+    s, _ = submit.accept(a, blob=zipped, bot="cxx", owner="alice")
+    order = []
+    monkeypatch.setattr(submit.runner, "build_wasm", lambda d: order.append("build") or Path(d))
+    monkeypatch.setattr(submit.runner, "play", lambda *x, **k: order.append("check game") or
+                        type("R", (), {"winner": "A", "rounds": 9, "reason": "x", "replay": None})())
+    assert submit.check(a, s) and order == ["build", "check game"] and s.status == "queued"
+
+    def broken(d):
+        raise clangtool.BuildError("compiling main.cpp\nmain.cpp:1:1: error: expected ';'")
+    s2, _ = submit.accept(a, blob=make_zip({"bot.toml": '[project]\nlanguage = "c++"\n', "main.cpp": "x"}),
+                          bot="cxx2", owner="alice")
+    monkeypatch.setattr(submit.runner, "build_wasm", broken)
+    assert not submit.check(a, s2)
+    assert s2.status == "rejected" and "didn't compile" in s2.reason and "expected ';'" in s2.reason

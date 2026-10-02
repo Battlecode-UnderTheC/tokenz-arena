@@ -177,7 +177,8 @@ def reject(arena: Arena, s: Submission, reason: str, log: str | None = None):
 
 
 def check(arena: Arena, s: Submission) -> bool:
-    """Unpacks and checks a submission; on success it's queued for games. Slow (one game)."""
+    """Unpacks, compiles and checks a submission; on success it's queued for games. Slow (a
+    build and one game)."""
     cfg = arena.cfg
     try:
         root = _unpack((cfg.submissions / s.id / "source.zip").read_bytes(), cfg.bots / s.id)
@@ -187,6 +188,16 @@ def check(arena: Arena, s: Submission) -> bool:
         s.warnings = _map_names(cfg, root)
     except Rejected as e:
         reject(arena, s, str(e))
+        return False
+    # Compile first, with the judge's own clang: a bot that doesn't compile is rejected with the
+    # compiler's message, and one that does is in the engine's cache before it's queued, so
+    # workers download the build instead of compiling it (runner.build_wasm, docs/WORKERS.md).
+    try:
+        runner.build_wasm(cfg.bots / s.id)
+    except Exception as e:
+        said = str(e).strip()
+        reject(arena, s, "didn't compile: " + (said.splitlines()[-1] if said else type(e).__name__)[:300],
+               said[-4000:])
         return False
     maps = sorted(cfg.map_dir("official").glob("*.map"), key=lambda p: p.stat().st_size)
     opponent = _reference_dir(arena) or cfg.bots / s.id
