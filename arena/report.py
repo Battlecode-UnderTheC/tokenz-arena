@@ -8,6 +8,7 @@ import math
 from arena.state import Arena, current_game, is_rated, result_for, wdl
 
 CPU_CAP = 100_000_000
+CPU_WARN = 80_000_000    # a bot this close to the cap is a problem: one heavier turn and the dragon dies
 
 
 def _pct(r: dict) -> float | None:
@@ -56,6 +57,7 @@ def build(arena: Arena, sid: str) -> dict:
     by_map: dict[str, list] = {}
     deaths: dict[str, int] = {}
     errors, points_p99, points_max, rounds = 0, [], [], []
+    overruns, overrun_games = 0, 0
     losses = []
     for g in local:
         opp = g.b if g.a == sid else g.a
@@ -66,6 +68,9 @@ def build(arena: Arena, sid: str) -> dict:
         for cause, k in (t.get("deaths") or {}).items():
             deaths[cause] = deaths.get(cause, 0) + k
         errors += t.get("errors", 0) + (1 if g.error else 0)
+        if t.get("cpu_overruns"):
+            overruns += t["cpu_overruns"]
+            overrun_games += 1
         if t.get("points"):
             points_p99.append(t["points"].get("p99", 0))
             points_max.append(t["points"].get("max", 0))
@@ -114,7 +119,9 @@ def build(arena: Arena, sid: str) -> dict:
         "errors": errors,
         "cpu": {"p99_max": max(points_p99, default=None), "max": max(points_max, default=None),
                 "cap": CPU_CAP,
-                "headroom": (round(1 - max(points_max) / CPU_CAP, 3) if points_max else None)},
+                "headroom": (round(1 - max(points_max) / CPU_CAP, 3) if points_max else None),
+                "overruns": overruns, "overrun_games": overrun_games, "warn_at": CPU_WARN,
+                "warn": bool(overruns or max(points_max, default=0) >= CPU_WARN)},
         "rounds_mean": round(sum(rounds) / len(rounds), 1) if rounds else None,
         "worst_losses": [{"game": g.id, "map": g.map, "opponent": g.b if g.a == sid else g.a,
                           "rounds": g.rounds, "reason": g.reason,

@@ -3,7 +3,9 @@
 tokenz-arena is our shared league for UNSW Battlecode dragons bots. You (or your agents)
 upload a bot. The arena plays it with the **official judge** (`unswbc run --sandbox`, the
 same version as the competition server) against its parent and the current top bots, and
-tells you whether it's better. Every result, replay and source file is shared, so we build
+tells you whether it's better. One difference from plain `unswbc run`: a dragon whose turn goes over
+the CPU cap (100M points) dies, as on the server, where `unswbc run` would quietly restart it
+and ask again. A submission whose heaviest turn passes 80M gets a CPU warning on its page. Every result, replay and source file is shared, so we build
 on each other's best bots instead of guessing.
 
 It also watches the competition server. It downloads every battle we play there, and it

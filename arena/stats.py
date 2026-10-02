@@ -5,6 +5,7 @@ The verbose log (`unswbc run -v`, 1.2.3) has per-turn lines we count:
     round 12: bot 3 (team A) stdout:          then the bot's commands (MOVE E, SPLIT 4, SONAR N 3)
     round 12: bot 3 (team A) points 4512345 memory 1234
     round 67: bot 1 (team B) died: hit a wall
+    round 441: bot 1 (team B) exceeded CPU limit       (then "died: no valid action")
     running round 51/500 --  last: 0ms  eta: 16.2s  dragons: 3 vs 4
     team A wins after 500 rounds (longest dragon, 45 to 34) (11.1s)
 
@@ -19,6 +20,7 @@ from arena.runner import GameResult
 
 _STDOUT = re.compile(r"^round (\d+): bot (\d+) \(team ([AB])\) stdout:")
 _POINTS = re.compile(r"^round \d+: bot \d+ \(team ([AB])\) points (\d+)")
+_OVERRUN = re.compile(r"^round \d+: bot \d+ \(team ([AB])\) exceeded CPU limit")
 _PROGRESS = re.compile(r"^running round (\d+)/\d+ .*dragons: (\d+) vs (\d+)")
 _TIEBREAK = re.compile(r"^(.*?),\s*(\d+) to (\d+)$")
 _ERROR = re.compile(r"(timed out|time limit|crash|exception|out of memory|memory limit|"
@@ -27,7 +29,7 @@ _ERROR = re.compile(r"(timed out|time limit|crash|exception|out of memory|memory
 
 def extract(result: GameResult) -> dict:
     teams = {t: {"deaths": {}, "bots": set(), "turns": 0, "moves": 0, "sprints": 0, "splits": 0,
-                 "sonars": 0, "errors": 0, "points_max": 0} for t in "AB"}
+                 "sonars": 0, "errors": 0, "points_max": 0, "cpu_overruns": 0} for t in "AB"}
     series = []          # [round, dragons A, dragons B] every 10 rounds
     team = None
     for line in result.log.splitlines():
@@ -51,6 +53,9 @@ def extract(result: GameResult) -> dict:
             t = teams[m.group(1)]
             t["points_max"] = max(t["points_max"], int(m.group(2)))
             team = None
+            continue
+        if m := _OVERRUN.match(line):
+            teams[m.group(1)]["cpu_overruns"] += 1
             continue
         if m := _PROGRESS.match(line):
             r = int(m.group(1))

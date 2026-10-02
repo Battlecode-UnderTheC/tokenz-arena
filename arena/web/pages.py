@@ -759,7 +759,14 @@ async function setParent() {{
                        f'<a href="/games/{x["game"]}">watch</a>' if x["replay"] else
                        '<span class="muted">replay pruned</span>'] for x in rep["worst_losses"]]
             hd = rep["holdout"]
-            rep_html = f"""<h2>Report <span class="sub">{rep["games"]} games ·
+            cpu_warn = ""
+            if cpu["warn"]:
+                said = (f'{cpu["overruns"]} dragons went over the {fmt(cpu["cap"])} CPU cap and died '
+                        f'(in {cpu["overrun_games"]} games)' if cpu["overruns"] else
+                        f'its heaviest turn used {fmt(cpu["max"])} of the {fmt(cpu["cap"])} CPU cap')
+                cpu_warn = (f'<p><span class="chip warn">CPU</span> {e(said)}: a turn over the cap is a '
+                            f'dead dragon. Bring it under {fmt(cpu["warn_at"])}.</p>')
+            rep_html = f"""{cpu_warn}<h2>Report <span class="sub">{rep["games"]} games ·
 {rec(rep["record"])} · {f'{rep["record"]["score"]}%' if rep["record"]["score"] is not None else ''}
 {f' · {rep["rounds_mean"]} rounds mean' if rep["rounds_mean"] else ''}
 {f' · holdout {rec(hd)}' if hd else ''}</span></h2>
@@ -781,6 +788,7 @@ async function setParent() {{
 <div>max</div><div>{fmt(cpu["max"])}</div>
 <div>cap</div><div>{fmt(cpu["cap"])}</div>
 <div>headroom</div><div>{f'{100 * cpu["headroom"]:.0f}%' if cpu["headroom"] is not None else '-'}</div>
+<div>over the cap</div><div>{cpu["overruns"]} dragons in {cpu["overrun_games"]} games</div>
 </div></div>
 </div>
 <h2>Worst losses</h2>{table(["game", "map", "opponent", "rounds", "end", ""], losses, numeric={0, 3},

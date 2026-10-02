@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -148,10 +149,14 @@ def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
         shutil.copytree(bot_a, a)
         shutil.copytree(bot_b, b)
         out = Path(work, "replay")
-        cmd = [unswbc, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
+        # unswbc's CLI, except that a bot dying in its turn isn't asked again (arena/strictjudge.py)
+        judge = [sys.executable, "-m", "arena.strictjudge"] if unswbc == "unswbc" else [unswbc]
+        cmd = [*judge, "run", str(map_path), str(a), str(b), "--sandbox", "--seed", str(seed),
                "-v", "-o", str(out)]
         start = time.monotonic()
         env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}   # plain output to parse
+        root = str(Path(__file__).resolve().parent.parent)          # arena.strictjudge, from cwd=work
+        env["PYTHONPATH"] = os.pathsep.join(p for p in (root, env.get("PYTHONPATH")) if p)
         try:
             proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout,
                                   errors="replace", env=env)

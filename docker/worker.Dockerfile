@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir --no-compile "unswbc==${UNSWBC}" "wasmtime==${WAS
     && rm -rf "$site/replay-viewer.vsix" "$site/templates" \
     && find / -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null; true
 # Only the worker's modules (all standard library): the rest of the arena isn't here.
-COPY arena/__init__.py arena/cli.py arena/worker.py arena/judge.py arena/runner.py arena/stats.py \
+COPY arena/__init__.py arena/cli.py arena/worker.py arena/judge.py arena/runner.py arena/strictjudge.py arena/stats.py \
      arena/state.py arena/store.py arena/config.py arena/maps.py arena/submit.py /app/arena/
 COPY arena/metrics/__init__.py arena/metrics/state.py /app/arena/metrics/
 COPY arena/metrics/plugins/ /app/arena/metrics/plugins/
