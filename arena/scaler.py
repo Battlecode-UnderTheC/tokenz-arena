@@ -136,7 +136,7 @@ class Scaler:
         # paused_minutes is returned and replaced
         self.interruptible = bool(g("interruptible", True))
         self.bid_margin = float(g("bid_margin", 1.15))
-        self.paused_s = float(g("paused_minutes", 10)) * 60
+        self.paused_s = float(g("paused_minutes", 0)) * 60
         # safety: rentals per hour, boot failures in a row before renting stops (until --resume),
         # and how long the engine may be unreachable before every machine is returned
         self.max_rents_per_hour = int(g("max_rents_per_hour", 4))

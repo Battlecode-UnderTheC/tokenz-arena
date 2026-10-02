@@ -55,7 +55,7 @@ like any worker's.
 | key | default | |
 |---|---|---|
 | `dry_run` | `true` | Decide and report only; rent nothing. `arena scaler --live` overrides. |
-| `interruptible`, `bid_margin`, `paused_minutes` | true, 1.15, 10 | Rent interruptible (bid) machines, bidding the minimum +15%. One that's outbid pauses: it counts as no slots, and after 10 minutes it's returned and replaced. Its games' leases expire and are played elsewhere. |
+| `interruptible`, `bid_margin`, `paused_minutes` | true, 1.15, 0 | Rent interruptible (bid) machines, bidding the minimum +15%. One that's outbid pauses: it counts as no slots at once (a replacement is rented on the next tick), and it's destroyed after `paused_minutes` (0: on the next tick). Its games' leases expire and are played elsewhere. |
 | `target_minutes` | 5 | Clear the backlog within this long. |
 | `start_backlog` | 500 | Rent nothing while this many games or fewer wait. |
 | `max_per_hour`, `max_per_day`, `max_instances` | 1.0, 10.0, 6 | Caps. |

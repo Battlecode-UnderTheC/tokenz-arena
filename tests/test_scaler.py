@@ -67,7 +67,7 @@ def make(tmp_path):
 
 
 def test_rents_for_the_backlog_within_caps(make):
-    s, vast, clock = make()
+    s, vast, clock = make(target_minutes=30)
     s.queue = lambda: queue(left=3000)                 # 3000 x 30 s / 30 min = 50 slots; we own 20
     p = s.tick()
     assert p["needed_slots"] == 50 and p["want_rented"] == 30
