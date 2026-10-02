@@ -7,3 +7,4 @@ arena.toml
 .env
 !tests/data/*.replay
 .deployed
+judge/build/
