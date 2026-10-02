@@ -7,6 +7,8 @@ exists or is running. Every pairing is played from both seats.
 
 from __future__ import annotations
 
+import functools
+
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,8 +31,8 @@ class Job:
     owner: str
     for_sub: str        # the submission this game is owed to
 
-    @property
-    def key(self) -> tuple:
+    @functools.cached_property
+    def key(self) -> tuple:      # cached: the queue and the scheduler ask for it thousands of times
         return (self.a, self.b, self.suite, Path(self.map).stem, self.seed)
 
     @property
@@ -213,16 +215,19 @@ def _holdout(arena: Arena) -> list[Job]:
     return out
 
 
-def _continuous(arena: Arena, taken: set) -> list[Job]:
+def _continuous(arena: Arena, taken, met: dict | None = None) -> list[Job]:
+    """The next background pair: the least-played pairs of close ratings first. `met` is the
+    rated games per pair (the queue keeps it; computed here when not given)."""
     cur = ranking(arena)
     if len(cur) < 2:
         return []
     ratings = getattr(arena, "ratings", {}) or {}
-    met: dict[frozenset, int] = {}
-    for g in arena.games:
-        if is_rated(g):
-            k = frozenset((g.a, g.b))
-            met[k] = met.get(k, 0) + 1
+    if met is None:
+        met = {}
+        for g in arena.games:
+            if is_rated(g):
+                k = frozenset((g.a, g.b))
+                met[k] = met.get(k, 0) + 1
     pairs = []
     for i, a in enumerate(cur):
         for b in cur[i + 1:]:
@@ -239,54 +244,13 @@ def _continuous(arena: Arena, taken: set) -> list[Job]:
 
 
 def next_jobs(arena: Arena, limit: int) -> list[Job]:
-    """Up to `limit` jobs to start now, in priority and fair-share order."""
-    with arena.lock:
-        taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games if current_game(g)}
-        taken |= set(arena.running)
-        owed = []
-        for s in arena.subs.values():
-            owed += [j for j in owed_for(arena, s) if j.key not in taken]
-        if not owed:
-            owed = [j for j in _holdout(arena) if j.key not in taken]
-        if not owed and arena.cfg.get("play", "continuous", True):
-            owed = _continuous(arena, taken)
-        busy: dict[str, int] = {}
-        for r in arena.running.values():
-            busy[r["job"].owner] = busy.get(r["job"].owner, 0) + 1
-        created = {sid: s.created for sid, s in arena.subs.items()}
-        out, seen = [], set()
-        while owed and len(out) < limit:
-            owed.sort(key=lambda j: (j.priority, busy.get(j.owner, 0), created.get(j.for_sub, ""),
-                                     j.map, j.seed))
-            j = owed.pop(0)
-            if j.key in seen:
-                continue
-            seen.add(j.key)
-            out.append(j)
-            busy[j.owner] = busy.get(j.owner, 0) + 1
-        return out
+    """Up to `limit` jobs to start now, in priority and fair-share order (arena/queue.py;
+    nothing is started: GameQueue.take() picks and starts in one step)."""
+    from arena import queue
+    return queue.get(arena).peek(limit)
 
 
 def settle(arena: Arena):
-    """Moves submissions whose owed games are all played: draft -> done, placing -> rated; and a
-    done draft back to playing when some of its games stopped counting (a map changed)."""
-    with arena.lock:
-        taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games if current_game(g)}
-        running = set(arena.running)
-        for s in arena.subs.values():
-            if s.status == DONE and s.lane == "draft":
-                if any(j.key not in taken for j in owed_for(arena, s)):
-                    s.status = PLAYING
-                    arena.save_sub(s)
-                continue
-            if s.status not in (QUEUED, PLAYING, PLACING):
-                continue
-            keys = {j.key for j in owed_for(arena, s)}
-            if keys & running:
-                if s.status == QUEUED:
-                    s.status = PLAYING
-                    arena.save_sub(s)
-                continue
-            if keys <= taken:
-                s.status = DONE if s.lane == "draft" else RATED
-                arena.save_sub(s)
+    """Applies status moves for anything that changed (arena/queue.py does the work)."""
+    from arena import queue
+    queue.get(arena).sync()

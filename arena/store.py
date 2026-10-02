@@ -8,7 +8,8 @@
 
 Only the arena process writes, and every write is a temp file plus an atomic rename, so a
 crash never leaves half a file. On start the process loads everything into memory; the
-queue isn't stored, it's rebuilt from what each submission still owes.
+queue lives in the engine's memory (arena/queue.py), rebuilt from what each submission still owes
+when the engine starts; data/queue.json is only its last snapshot, for the website.
 """
 
 from __future__ import annotations

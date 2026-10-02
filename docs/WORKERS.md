@@ -28,7 +28,7 @@ Non-goals:
   worker C ─┘   bot zips, maps (served by web from disk)   built-in local pool = one more worker
 ```
 
-- **Engine** (`arena run`). Owns the queue as today (`scheduler.next_jobs`). New: a worker
+- **Engine** (`arena run`). Owns the queue (`arena/queue.py`). New: a worker
   registry and leases. The built-in process pool stays as the engine's own worker, so a single
   machine works exactly as now.
 - **Website** (`arena web`). Serves the workers' downloads (bot zips, map text) straight from the

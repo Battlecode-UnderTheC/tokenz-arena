@@ -201,6 +201,15 @@ When drafts pile up, owners share the workers fairly, so one teammate's 20 agent
 starve the others. There's no cap on how many drafts anyone queues: a busy owner's drafts just
 wait their turn.
 
+The engine keeps this queue in memory (`arena/queue.py`): each submission's owed games, what's
+running and what's been played, updated by events (a game starts, a result arrives, a lease
+expires, a submission's status, parent or opponents change). Nothing rescans all games except a
+full rebuild at start, when maps, seeds or the usable submissions change, and as a 10-minute
+audit. Picking the next games takes about 2 ms on 30k games. Every change bumps a version:
+`/api/v1/queue?since=V` waits for the next one and `/api/v1/queue/stream` pushes each change
+(server-sent events), so the Queue page is live. The engine also writes `data/queue.json`, which
+the website serves while the engine restarts.
+
 ## 4. Ratings
 
 Bradley-Terry over ranked games among current submissions (a draw counts as half a win). It's
@@ -242,7 +251,8 @@ page for agents.
 | `GET /api/v1/games/{id}` | One game in full, with the stats series. |
 | `GET /api/v1/games/{id}/replay` | The replay file. |
 | `GET /api/v1/stats/maps` | Per map: games, how they end, first-seat advantage. |
-| `GET /api/v1/queue` | What's playing and waiting, by lane and owner. |
+| `GET /api/v1/queue` | What's playing and waiting, by lane and owner (from the engine's live queue; `?since=V` waits for the next change). |
+| `GET /api/v1/queue/stream` | The same, pushed on every change (server-sent events). |
 | `GET /api/v1/server/*` | The competition server: summary, ladder, our submissions and battles, challenges, quota, maps, tournaments (section 8). |
 | `GET /health` | Daemon heartbeat, workers, unswbc version, disk free. |
 | `GET /llms.txt` | A plain-text guide to all of the above. |
@@ -269,7 +279,7 @@ agent always see the same numbers.
 | `/maps` | Per-map stats, with a preview of each map. |
 | `/ideas` | Searchable notes with outcomes: the experiment log. |
 | `/submit` | Upload form (zip, bot, parent, note, source) for people who aren't using curl. Shows "submitting as alice@github". |
-| `/queue` | What's playing now and what's waiting. |
+| `/queue` | What's playing now and what's waiting, live (updates as games start and finish). |
 | `/server` | The competition server: live bot, rank, battles with replays, quota, the candidate and why. |
 
 **Replay viewer in the browser.** The toolkit ships its VS Code replay viewer

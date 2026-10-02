@@ -1,6 +1,6 @@
 """Remote workers (docs/WORKERS.md): machines that join, lease games, return results, and leave.
 
-The engine keeps the queue (scheduler.next_jobs); a worker leases games from it. A leased game
+The engine keeps the queue (arena/queue.py); a worker leases games from it. A leased game
 counts as running, so it's never handed out twice; a lease that isn't renewed by heartbeats
 expires and the game is owed again. Holdout games are never leased: their maps stay on the
 engine's machine.
@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from arena import scheduler
+from arena import queue, scheduler
 from arena.state import ENGINE, Arena, now, rules
 
 LEASE_SECONDS = 120
@@ -79,17 +79,13 @@ class Registry:
         self._touch(name, host, version, slots, token)
         a, out = self.arena, []
         if want > 0 and not self.daemon.paused_remote:
-            jobs = [j for j in scheduler.next_jobs(a, want * 2) if j.suite != "holdout"][:want]
-            with a.lock:
-                for j in jobs:
-                    if j.key in a.running:
-                        continue
-                    lid = secrets.token_hex(8)
-                    expires = time.time() + self.lease_seconds
-                    a.running[j.key] = {"job": j, "started": now(), "worker": name, "lease": lid}
-                    with self.lock:
-                        self.leases[lid] = {"job": j, "worker": name, "expires": expires}
-                    out.append({"lease": lid, "game": self._describe(j)})
+            def lease_of(j):               # holdout games never leave this machine (take skips them)
+                lid = secrets.token_hex(8)
+                with self.lock:
+                    self.leases[lid] = {"job": j, "worker": name, "expires": time.time() + self.lease_seconds}
+                return {"lease": lid}
+            for j in queue.get(a).take(want, name, lease_of):
+                out.append({"lease": a.running[j.key]["lease"], "game": self._describe(j)})
         return {"leases": out, "lease_seconds": self.lease_seconds,
                 "heartbeat_seconds": HEARTBEAT_SECONDS, "engine": ENGINE}
 
@@ -151,11 +147,9 @@ class Registry:
             for n in gone:
                 self.workers.pop(n, None)
         if expired:
-            with self.arena.lock:
-                for l in expired:
-                    r = self.arena.running.get(l["job"].key)
-                    if r and r.get("worker") == l["worker"]:
-                        self.arena.running.pop(l["job"].key, None)
+            q = queue.get(self.arena)
+            for l in expired:
+                q.release(l["job"], l["worker"])      # owed again, first in line
             self.daemon.wake.set()
 
     def snapshot(self) -> list[dict]:

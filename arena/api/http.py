@@ -9,15 +9,16 @@ the server endpoints (arena/server/routes.py), when present.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 from dataclasses import asdict
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
-from arena import report, scheduler, submit, who
+from arena import report, scheduler, store, submit, who
 from arena.config import ROOT
-from arena.state import DONE, HIDDEN_SUITES, RATED, REJECTED, Arena, current_game, is_rated, result_for, wdl
+from arena.state import DONE, HIDDEN_SUITES, RATED, REJECTED, Arena, is_rated, result_for, wdl
 from arena.web import viewer
 
 FINAL = {DONE, RATED, REJECTED, "retired"}
@@ -277,25 +278,22 @@ def map_stats(arena: Arena) -> list[dict]:
 
 
 def queue(arena: Arena) -> dict:
-    """GET /api/v1/queue: what's playing and what's waiting."""
-    with arena.lock:
-        running = [{"a": r["job"].a, "b": r["job"].b, "map": r["job"].map.rsplit("/", 1)[-1][:-4],
-                    "seed": r["job"].seed, "lane": r["job"].lane, "owner": r["job"].owner,
-                    "started": r["started"], "worker": r.get("worker", "local")}
-                   for r in arena.running.values()]
-        checking = [s.id for s in arena.subs.values() if s.status == "checking"]
-    waiting: dict[str, dict] = {}
-    for s in list(arena.subs.values()):
-        # everything the scheduler still owes, ranked bots' background top-ups included
-        if s.status in ("queued", "playing", "placing", "done", "rated"):
-            owed = scheduler.owed_for(arena, s)
-            taken = {(g.a, g.b, g.suite, g.map, g.seed) for g in arena.games_of(s.id) if current_game(g)}
-            left = sum(1 for j in owed if j.key not in taken)
-            if left:
-                waiting[s.id] = {"owner": s.owner, "lane": s.lane, "status": s.status,
-                                 "games_left": left, "games_total": len(owed)}
-    return {"workers": workers_of(arena),
-            "running": running, "checking": checking, "waiting": waiting}
+    """GET /api/v1/queue: what's playing and what's left. The engine answers from its live
+    queue (arena/queue.py); a website without the engine shows the engine's last snapshot."""
+    if not arena.readonly:
+        from arena import queue as Q
+        return Q.get(arena).view()
+    snap = store.read_json(arena.cfg.data_dir / "queue.json", None) or {
+        "running": [], "checking": [], "waiting": {}, "workers": 0, "totals": {"left": 0}, "version": 0}
+    snap = dict(snap)
+    snap["live"] = False
+    try:
+        import datetime as _dt
+        at = _dt.datetime.fromisoformat(str(snap.get("updated")).replace("Z", "+00:00"))
+        snap["age_s"] = round((_dt.datetime.now(_dt.timezone.utc) - at).total_seconds())
+    except (TypeError, ValueError):
+        snap["age_s"] = None
+    return snap
 
 
 def workers_of(arena: Arena) -> int:
@@ -322,6 +320,34 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
         @app.middleware("http")
         async def to_engine(request: Request, call_next):
             path = request.url.path
+            if request.method == "GET" and path == "/api/v1/queue/stream":
+                from fastapi.responses import StreamingResponse
+                client = httpx.AsyncClient(timeout=httpx.Timeout(10, read=None))
+                try:
+                    up = await client.send(client.build_request("GET", engine_url + path), stream=True)
+                except httpx.HTTPError:
+                    await client.aclose()
+                    return JSONResponse({"detail": "the live queue needs the engine; it's restarting"},
+                                        status_code=503)
+
+                async def relay():
+                    try:
+                        async for chunk in up.aiter_raw():
+                            yield chunk
+                    finally:
+                        await up.aclose()
+                        await client.aclose()
+                return StreamingResponse(relay(), media_type="text/event-stream",
+                                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+            if request.method == "GET" and path == "/api/v1/queue":
+                try:
+                    async with httpx.AsyncClient(timeout=40) as c:
+                        r = await c.get(engine_url + path, params=list(request.query_params.multi_items()))
+                    if r.status_code == 200:
+                        return Response(r.content, status_code=200, media_type="application/json")
+                except httpx.HTTPError:
+                    pass
+                return await call_next(request)         # the engine's last snapshot
             if path.startswith("/api/") and (request.method not in ("GET", "HEAD", "OPTIONS")
                                              or path.startswith("/api/v1/server")):
                 headers = {k: v for k, v in request.headers.items() if k.lower() not in FORWARD_DROP}
@@ -542,8 +568,36 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
         return map_stats(arena)
 
     @api.get("/queue")
-    def get_queue():
+    def get_queue(since: int | None = None, wait: float = 25):
+        """What's playing and what's left. `since=V` waits (up to `wait` s, at most 25) until
+        the queue changes after version V: a long poll for live views."""
+        if since is not None and not arena.readonly:
+            from arena import queue as Q
+            Q.get(arena).wait(since, max(0.0, min(float(wait), 25.0)))
         return queue(arena)
+
+    @api.get("/queue/stream")
+    async def queue_stream(request: Request):
+        """Server-sent events: a `queue` event with the full view whenever it changes (at
+        most 5 a second), and a comment every 15 s to keep the connection open."""
+        from fastapi.responses import StreamingResponse
+        if arena.readonly:
+            raise HTTPException(503, "the live queue comes from the engine")
+        from arena import queue as Q
+        q = Q.get(arena)
+
+        async def events():
+            seen = -1
+            while not await request.is_disconnected():
+                v = await asyncio.to_thread(q.wait, seen, 15.0)
+                if v == seen:
+                    yield ": ping\n\n"
+                    continue
+                seen = v
+                yield "event: queue\ndata: " + json.dumps(q.view(), separators=(",", ":")) + "\n\n"
+                await asyncio.sleep(0.2)
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     app.include_router(api)
 

@@ -115,6 +115,7 @@ class Arena:
         self.games: list[Game] = []
         self.bots: dict[str, dict] = {}
         self.running: dict[tuple, dict] = {}     # job key -> {job, started}
+        self.by_sub: dict[str, list[Game]] = {}  # submission id -> its games (games_of)
         self.paused = False
         self.started = now()
         self._load()
@@ -132,6 +133,7 @@ class Arena:
         for g in store.load_all(self.cfg.games, "*.json"):
             self.games.append(Game(**g))
         self.games.sort(key=lambda g: g.id)
+        self._index()
         self.bots = store.read_json(self.cfg.data_dir / "bots.json", {})
         # A submission caught mid-check or mid-play by a restart just continues.
         for s in self.subs.values():
@@ -201,8 +203,11 @@ class Arena:
             self.subs.update(subs)
             if full:
                 self.games = sorted(new_games, key=lambda g: g.id)
+                self._index()
             elif new_games:
                 self.games.extend(new_games)
+                for g in new_games:
+                    self._index_game(g)
             if bots is not None:
                 self.bots = bots
             if ratings is not None:
@@ -214,6 +219,7 @@ class Arena:
         with self.lock:
             g.id = (self.games[-1].id + 1) if self.games else 1
             self.games.append(g)
+            self._index_game(g)
             store.write_json(self.cfg.games / f"{g.id}.json", asdict(g))
             return g
 
@@ -237,8 +243,19 @@ class Arena:
                 out.append(s)
         return out
 
+    def _index(self):
+        self.by_sub = {}
+        for g in self.games:
+            self._index_game(g)
+
+    def _index_game(self, g: Game):
+        self.by_sub.setdefault(g.a, []).append(g)
+        if g.b != g.a:
+            self.by_sub.setdefault(g.b, []).append(g)
+
     def games_of(self, sid: str) -> list[Game]:
-        return [g for g in self.games if sid in (g.a, g.b)]
+        """A submission's games, oldest first (from the index, not a scan)."""
+        return list(self.by_sub.get(sid, ()))
 
     def by_sha(self, sha: str) -> Submission | None:
         return next((s for s in self.subs.values() if s.sha256 == sha), None)

@@ -18,8 +18,8 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
-from arena import judge, rating, scheduler, store, submit
-from arena.state import CHECKING, ENGINE, Arena, Game, current_game, now
+from arena import judge, queue, rating, scheduler, store, submit
+from arena.state import CHECKING, ENGINE, Arena, Game, now
 
 log = logging.getLogger("arena")
 
@@ -45,6 +45,7 @@ class Daemon:
         arena.daemon = self
         self.registry = None                 # arena.workers.Registry once remote workers are enabled
         self.paused_remote = False
+        self._snapshot_at = 0.0
 
     def install_maps(self):
         """Keeps the worldgen suites current: this week's rotating maps and the holdout."""
@@ -101,15 +102,16 @@ class Daemon:
         for s in sorted(pending, key=lambda s: s.created)[:max(0, check_free)]:
             self.checking.add(s.id)
             self.checks.submit(self._check, s)
+        q = queue.get(a)
+        q.sync()
+        if time.monotonic() - self._snapshot_at >= queue.SNAPSHOT_SECONDS:
+            self._snapshot_at = time.monotonic()
+            q.snapshot()
         free = self.workers - self.busy()
         if free <= 0:
             return
-        scheduler.settle(a)
-        for job in scheduler.next_jobs(a, free):
-            with a.lock:
-                a.running[job.key] = {"job": job, "started": now(), "worker": "local"}
+        for job in q.take(free, "local"):
             self.pool.submit(self._play, job)
-        scheduler.settle(a)
 
     def _task(self, fn, name):
         try:
@@ -145,15 +147,7 @@ class Daemon:
         False (and records nothing) if that game was already recorded meanwhile, e.g. when an
         expired lease's game was played again elsewhere and both results arrive."""
         a, cfg = self.arena, self.arena.cfg
-        with a.lock:
-            done = any((g.a, g.b, g.suite, g.map, g.seed) == job.key and current_game(g)
-                       for g in reversed(a.games[-5000:]))
-            r = a.running.get(job.key)
-            if r and r.get("worker", "local") == worker:
-                a.running.pop(job.key, None)
-        if done:
-            log.info("game %s from %s: already recorded, dropped", job.key, worker)
-            return False
+        q = queue.get(a)
         g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
                  a=job.a, b=job.b, meta={"engine": ENGINE, "worker": worker})
         try:
@@ -168,7 +162,15 @@ class Daemon:
             g.seconds, g.stats = res.get("seconds"), res.get("stats") or {}
             if replay is None and res.get("replay"):
                 replay = Path(res["replay"])
-        a.add_game(g)
+        with a.lock:                     # check, store and record in one step: never twice
+            if q.is_played(job.key):
+                r = a.running.get(job.key)
+                if r and r.get("worker", "local") == worker:
+                    a.running.pop(job.key, None)
+                log.info("game %s from %s: already recorded, dropped", job.key, worker)
+                return False
+            a.add_game(g)
+            q.record(g, job)
         if res.get("metrics"):
             store.write_json(cfg.data_dir / "metrics" / f"{g.id}.json", res["metrics"])
         if replay and replay.exists():
@@ -184,7 +186,6 @@ class Daemon:
         log.info("game %d %s vs %s on %s (%s): %s", g.id, g.a, g.b, g.map, worker,
                  g.error or g.winner or "draw")
         self.rate()
-        scheduler.settle(a)
         self.wake.set()
         return True
 

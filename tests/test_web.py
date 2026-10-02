@@ -144,7 +144,7 @@ def test_submit_queue_server(client):
 
 def test_json_routes_still_answer(client, arena):
     assert client.get("/api/v1/stats/maps").json()[0]["games"] >= 1
-    assert set(client.get("/api/v1/queue").json()) == {"workers", "running", "checking", "waiting"}
+    assert {"workers", "running", "checking", "waiting", "totals", "version"} <= set(client.get("/api/v1/queue").json())
     ideas = client.get("/api/v1/ideas", params={"outcome": "beat_parent"}).json()
     assert [i["id"] for i in ideas] == [arena.ids["draft"]]
     assert client.get("/api/v1/bots/base").json()["head_to_head"]

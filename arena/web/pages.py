@@ -1393,37 +1393,66 @@ f.onsubmit = async (ev) => {{
     # ------------------------------------------------------------ queue
     @r.get("/queue", response_class=HTMLResponse)
     def queue_page():
-        qd = http.queue(arena)
-        run = [[sub_link(arena, x["a"]), sub_link(arena, x["b"]), e(x["map"]), e(x["seed"]),
-                e(x["lane"]), e(x["owner"]), e(x.get("worker", "local")), when(x["started"])]
-               for x in qd["running"]]
-        order = {"draft": 0, "ranked": 1}
-        wait = [[sub_link(arena, sid), e(w["owner"]), e(w["lane"]), e(w.get("status", "")), str(w["games_left"]),
-                 str(w["games_total"]),
-                 score_bar(100 * (1 - w["games_left"] / w["games_total"])) if w["games_total"] else ""]
-                for sid, w in sorted(qd["waiting"].items(), key=lambda kv: (order.get(kv[1]["lane"], 2), kv[0]))]
-        games_left = sum(w["games_left"] for w in qd["waiting"].values())
-        chk = " · ".join(sub_link(arena, x) for x in qd["checking"])
-        hb = getattr(arena, "heartbeat", None) or {}
-        reg = getattr(arena, "workers", None)
-        remote = reg.snapshot() if reg is not None else hb.get("remote") or []
-        local_slots = hb.get("local_workers", getattr(getattr(arena, "daemon", None), "workers", 0))
-        local_running = sum(1 for x in qd["running"] if x.get("worker", "local") == "local")
-        wrows = [["this machine (engine)", "", str(local_slots), str(local_running), "", ""]] + [
-            [e(w["name"]), e(w["host"]), str(w["slots"]), str(w["running"]), str(w["games_last_hour"]),
-             f'{w["last_seen_s"]}s ago'] for w in remote]
-        body = f"""<h1>Queue</h1>
-<h2>Judges <span class="sub">{local_slots + sum(w["slots"] for w in remote)} slots ·
-remote workers join with <code>arena worker</code> (docs/WORKERS.md)</span></h2>
-{table(["worker", "host", "slots", "playing", "games last hour", "last seen"], wrows, numeric={2, 3, 4})}
-<p class="sub">{qd["workers"]} judge workers · {len(qd["running"])} games playing ·
-{len(qd["waiting"])} submissions waiting, {games_left} games left · priority: drafts, placement, holdout, continuous.</p>
-<h2>Playing now</h2>
-{table(["seat A", "seat B", "map", "seed", "lane", "owner", "on", "started"], run, numeric={3}, empty="nothing playing")}
-<h2>Checking</h2><p>{chk or '<span class="muted">nothing</span>'}</p>
-<h2>Waiting</h2>
-{table(["submission", "owner", "lane", "status", "games left", "of", "done"], wait, numeric={4, 5}, empty="nothing waiting")}
-<script>setTimeout(() => location.reload(), 15000)</script>"""
+        """Live: rendered in the browser from /api/v1/queue, then updated from the engine's
+        event stream (/api/v1/queue/stream) as games start and finish."""
+        body = """<h1>Queue <span id="q-live" class="sub">connecting…</span></h1>
+<h2>Judges <span class="sub" id="q-slots"></span></h2><div id="q-judges"></div>
+<p class="sub" id="q-sum"></p>
+<h2>Playing now</h2><div id="q-running"></div>
+<h2>Checking</h2><p id="q-checking"></p>
+<h2>Waiting <span class="sub">by priority: drafts, placement, holdout, continuous</span></h2><div id="q-waiting"></div>
+<style>#q-live.on { color: var(--win); } #q-live.off { color: var(--loss); }</style>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (x) => String(x ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  const sub = (id) => `<a href="/s/${encodeURIComponent(id)}">${esc(id)}</a>`;
+  const table = (head, rows, num, empty) => rows.length ? `<div class="wrap"><table><thead><tr>${
+      head.map((h, i) => `<th class="${num.includes(i) ? "n" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${
+      rows.map((r) => "<tr>" + r.map((c, i) => `<td class="${num.includes(i) ? "n" : ""}">${c}</td>`).join("") + "</tr>").join("")
+    }</tbody></table></div>` : `<p class="muted">${empty}</p>`;
+  const ago = (iso) => { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+    return s < 60 ? `${s.toFixed(0)}s` : `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`; };
+  const bar = (p) => `<span class="bartrack"><span class="bar" style="width:${(100 * p).toFixed(0)}%"></span></span> ${(100 * p).toFixed(0)}%`;
+  const prio = {draft: 0, placement: 1, holdout: 2, continuous: 3};
+  let q = null;
+  function render() {
+    if (!q) return;
+    const remote = q.remote || [];
+    const local = (q.slots && q.slots.local) || 0;
+    const localRun = q.running.filter((x) => (x.worker || "local") === "local").length;
+    $("q-slots").textContent = `${local + remote.reduce((n, w) => n + w.slots, 0)} slots · remote workers join with arena worker (docs/WORKERS.md)`;
+    $("q-judges").innerHTML = table(["worker", "host", "slots", "playing", "games last hour", "last seen"],
+      [["this machine (engine)", "", local, localRun, "", ""]].concat(remote.map((w) =>
+        [esc(w.name), esc(w.host), w.slots, w.running, w.games_last_hour, `${w.last_seen_s}s ago`])), [2, 3, 4], "");
+    const waiting = Object.entries(q.waiting || {});
+    const t = q.totals || {};
+    $("q-sum").textContent = `${q.running.length} playing · ${waiting.length} submissions waiting, ${t.left ?? 0} games left`
+      + (t.by_lane ? " (" + Object.entries(t.by_lane).map(([k, v]) => `${k} ${v}`).join(", ") + ")" : "");
+    const run = [...q.running].sort((x, y) => (prio[x.lane] ?? 9) - (prio[y.lane] ?? 9) || x.started.localeCompare(y.started));
+    $("q-running").innerHTML = table(["seat A", "seat B", "map", "seed", "lane", "for", "on", "running"],
+      run.map((x) => [sub(x.a), sub(x.b), esc(x.map), x.seed, esc(x.lane), esc(x.owner), esc(x.worker),
+                      `<span class="tick" data-t="${esc(x.started)}">${ago(x.started)}</span>`]), [3, 7], "nothing playing");
+    $("q-checking").innerHTML = (q.checking || []).map(sub).join(", ") || '<span class="muted">nothing</span>';
+    waiting.sort(([a, x], [b, y]) => (prio[x.priority] ?? 9) - (prio[y.priority] ?? 9) || y.left - x.left || a.localeCompare(b));
+    $("q-waiting").innerHTML = table(["submission", "owner", "lane", "status", "games left", "of", "done"],
+      waiting.map(([id, w]) => [sub(id), esc(w.owner), esc(w.priority || w.lane), esc(w.status), w.left, w.total,
+                                w.total ? bar(1 - w.left / w.total) : ""]), [4, 5], "nothing waiting");
+  }
+  function status(text, on) { const el = $("q-live"); el.textContent = text; el.className = "sub " + (on ? "on" : "off"); }
+  async function load() {
+    const r = await fetch("/api/v1/queue"); q = await r.json(); render();
+    if (q.live === false) status(`engine offline: snapshot from ${q.age_s ?? "?"}s ago`, false);
+  }
+  function stream() {
+    const es = new EventSource("/api/v1/queue/stream");
+    es.addEventListener("queue", (ev) => { q = JSON.parse(ev.data); render(); status("● live", true); });
+    es.onerror = () => { status("reconnecting…", false); };
+  }
+  setInterval(() => document.querySelectorAll(".tick").forEach((el) => { el.textContent = ago(el.dataset.t); }), 1000);
+  load().then(stream).catch(() => { status("can't reach the arena", false); setTimeout(() => location.reload(), 5000); });
+})();
+</script>"""
         return layout("Queue", body, "/api/v1/queue", "/queue")
 
     # ------------------------------------------------------------ competition server
