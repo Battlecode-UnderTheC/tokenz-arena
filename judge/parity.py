@@ -81,7 +81,7 @@ def decoded(blob: bytes) -> dict:
 
 
 def timed(cmd: list[str], cwd: str) -> tuple[int, str, float, float]:
-    env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}
+    env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb", "PYTHONPATH": "/app"}   # arena.strictjudge
     start = time.monotonic()
     with tempfile.TemporaryFile() as log:
         proc = subprocess.Popen(cmd, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, env=env)
@@ -104,8 +104,11 @@ def play(g: dict, mp: str, judge: str, work: Path) -> dict:
         if not dst.exists():
             shutil.copytree(bot_dir(src), dst)
     out = work / f"replay-{judge}"
-    exe = ["unswbc"] if judge == "official" else [sys.executable, WRAPPER]
+    # the arena's rules: a bot that dies in its turn isn't asked again (arena/strictjudge.py)
+    exe = [sys.executable, "-m", "arena.strictjudge"] if judge == "official" else [sys.executable, WRAPPER]
     cmd = [*exe, "run", mp, str(a), str(b), "--sandbox", "--seed", str(g["seed"]), "-v", "-o", str(out)]
+    if judge != "official":
+        cmd.append("--no-retry")
     code, log, cpu, wall = timed(cmd, str(work))
     replays = sorted(out.glob("*.replay"))
     return {"code": code, "log": log, "cpu": cpu, "wall": wall,
@@ -114,7 +117,11 @@ def play(g: dict, mp: str, judge: str, work: Path) -> dict:
 
 def one(job) -> dict:
     g, mp, judges = job
-    ref = decoded((DATA / "replays" / g["replay"]).read_bytes()) if g.get("replay") else None
+    # the reference is the official judge's replay, played now under the arena's rules (a stored
+    # replay from before arena/strictjudge.py may have a retried bot in it); the stored one only
+    # when the official judge isn't run
+    stored = decoded((DATA / "replays" / g["replay"]).read_bytes()) if g.get("replay") else None
+    ref = None if "official" in judges else stored
     row = {"id": g["id"], "map": g["map"], "suite": g["suite"], "a": g["a"], "b": g["b"],
            "rounds": g["rounds"], "winner": g["winner"], "arena_seconds": g.get("seconds")}
     with tempfile.TemporaryDirectory(prefix="parity-") as w:
@@ -127,7 +134,9 @@ def one(job) -> dict:
                 Path(KEEP).mkdir(parents=True, exist_ok=True)
                 Path(KEEP, f"{g['id']}-{judge}.log").write_text(r["log"])
             if ref is None and r["replay"] is not None:
-                ref = decoded(r["replay"])     # an ad-hoc game: the official judge's is the reference
+                ref = decoded(r["replay"])     # the official judge's, played first
+                if stored is not None:
+                    row["official_vs_stored"] = ref == stored
             same = r["replay"] is not None and decoded(r["replay"]) == ref
             row[judge] = {"same": same, "code": r["code"], "cpu": round(r["cpu"], 3),
                           "wall": round(r["wall"], 3)}
@@ -183,6 +192,8 @@ def main() -> None:
     ap.add_argument("--out", default="/work/parity.jsonl")
     ap.add_argument("--adhoc", default="", help="BOT_A,BOT_B,MAP[,MAP...]: new games, official vs cpp")
     ap.add_argument("--seeds", default="1,2,3")
+    ap.add_argument("--heavy", type=int, default=0, help="extra long games of --heavy-bots")
+    ap.add_argument("--heavy-bots", default="queen-guard-")
     args = ap.parse_args()
     judges = args.judges.split(",")
     if args.adhoc:
@@ -207,6 +218,13 @@ def main() -> None:
                     out.append(x)
             return out
         pick = spread(long_, args.n // 2) + spread(short, args.n - args.n // 2)
+        if args.heavy:
+            # games of bots that come near the CPU cap, so the death rule is exercised
+            like = tuple(args.heavy_bots.split(","))
+            heavy = [x for x in games if x not in pick and (x[0]["rounds"] or 0) >= 350
+                     and any(x[0][t].startswith(like) for t in "ab")]
+            rnd.shuffle(heavy)
+            pick += heavy[:args.heavy]
     print(f"{len(games)} candidate games; testing {len(pick)} with {judges}", flush=True)
     prewarm(pick)
     jobs = [(g, mp, judges) for g, mp in pick]

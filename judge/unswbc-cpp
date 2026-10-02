@@ -18,11 +18,14 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 BINARIES = [HERE / "build" / "cppjudge", HERE / "cppjudge", pathlib.Path("/usr/local/lib/cppjudge/cppjudge")]
-FLAGS = {"-v", "--verbose", "--sandbox", "--no-replay"}
+FLAGS = {"-v", "--verbose", "--sandbox", "--no-replay", "--no-retry"}
 VALUED = {"-o", "--output", "--replay", "--seed"}
 
 
 def official(argv: list[str]) -> int:
+    if "--no-retry" in argv:                # the arena's judge: unswbc minus the retry
+        from arena.strictjudge import main as strict
+        return strict([a for a in argv if a != "--no-retry"])
     exe = shutil.which("unswbc")
     if exe is None:
         from unswbc.cli import main

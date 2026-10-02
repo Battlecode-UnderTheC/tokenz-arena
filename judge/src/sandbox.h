@@ -163,6 +163,9 @@ struct Dragon {
 };
 
 std::string utf8_replace(const std::string &s);
+// unswbc asks a bot again on a fresh worker when it died in its turn before saying anything;
+// --no-retry (arena/strictjudge.py) lets it die instead, as the competition server does.
+extern bool RETRY_ON_EXIT;
 extern std::atomic<int64_t> STAT_INST_NS, STAT_THREAD_NS, STAT_BOXES;
 
 }  // namespace cj

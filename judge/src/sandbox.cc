@@ -417,6 +417,7 @@ static std::string trap_text(wasm_trap_t *trap, wasmtime_error_t *err) {
   return s;
 }
 
+bool RETRY_ON_EXIT = true;
 std::atomic<int64_t> STAT_INST_NS{0}, STAT_THREAD_NS{0}, STAT_BOXES{0};
 
 static int64_t thread_ns() {
@@ -1227,7 +1228,7 @@ std::string Dragon::ask(const std::string &block) {
       std::lock_guard<std::mutex> lk(box->mu);
       said = !framer.out.empty() || !framer.line.empty();
     }
-    if (attempt || said) return skip(r);
+    if (attempt || said || !RETRY_ON_EXIT) return skip(r);   // --no-retry: dies in its turn, as on the server
     fresh();
   }
   return "";

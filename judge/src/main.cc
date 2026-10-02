@@ -445,7 +445,7 @@ struct Args {
 void usage() {
   fprintf(stderr,
           "usage: cppjudge run MAP NAME_A NAME_B --wasm-a A.wasm --wasm-b B.wasm --engine unswbc_engine.wasm\n"
-          "                [--seed S] [-v] [-o OUT] [--no-replay] [--debug N]\n"
+          "                [--seed S] [-v] [-o OUT] [--no-replay] [--no-retry] [--debug N]\n"
           "       cppjudge imports BOT.wasm   (exit 3 and list what this host lacks)\n"
           "       cppjudge warm-engine unswbc_engine.wasm\n");
   _exit(2);
@@ -702,6 +702,7 @@ int main(int argc, char **argv) {
     else if (s == "--engine") args.engine = val();
     else if (s == "--debug") args.debug = std::stoi(val());
     else if (s == "--stats") args.stats = true;
+    else if (s == "--no-retry") RETRY_ON_EXIT = false;
     else if (s == "--sandbox") {
     } else pos.push_back(s);
   }
