@@ -512,6 +512,30 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
         return FileResponse(p, media_type="application/octet-stream", headers=headers,
                             filename=f"{g.a}-vs-{g.b}-on-{g.map}-{g.id}.replay")
 
+    @api.get("/metrics")
+    def list_metrics():
+        """The registered in-game metrics (docs/METRICS.md)."""
+        from arena import metrics as M
+        return M.describe()
+
+    @api.get("/games/{gid}/metrics")
+    def game_metrics(gid: int):
+        """Every metric for both teams every 10 rounds, and the eval (P(A wins))."""
+        from arena.metrics import views
+        get_game_obj(gid)
+        m = views.game(arena, gid)
+        if not m:
+            raise HTTPException(404, "no metrics for this game yet (they're computed after the game, "
+                                     "or by the background backfill)")
+        return m
+
+    @api.get("/submissions/{sid}/metrics")
+    def submission_metrics(sid: str, limit: int = Query(300, le=2000)):
+        """Each metric averaged over the submission's recent games, its side vs its opponents."""
+        from arena.metrics import views
+        s = get_sub(sid)
+        return views.submission(arena, s.id, limit)
+
     @api.get("/stats/maps")
     def get_map_stats():
         return map_stats(arena)

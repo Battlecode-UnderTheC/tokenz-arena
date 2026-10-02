@@ -164,6 +164,8 @@ class Daemon:
             if replay is None and res.get("replay"):
                 replay = Path(res["replay"])
         a.add_game(g)
+        if res.get("metrics"):
+            store.write_json(cfg.data_dir / "metrics" / f"{g.id}.json", res["metrics"])
         if replay and replay.exists():
             cfg.replays.mkdir(parents=True, exist_ok=True)
             dest = cfg.replays / f"{g.id}.replay"

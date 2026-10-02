@@ -305,6 +305,25 @@ def make_server(app: FastAPI) -> MCPServer:
         showed, or correct the hypothesis; earlier versions are kept in note_history."""
         return await api.call(ctx, "PATCH", f"/submissions/{id}", json_body={"note": note})
 
+    @mcp.tool(annotations=READ)
+    async def metrics(ctx: Context) -> CallToolResult:
+        """The in-game metrics the arena records every 10 rounds of every game (dragons alive,
+        board control, longest dragon, queen, pearls eaten, deaths, kills, the eval = P(A wins))."""
+        return await api.call(ctx, "GET", "/metrics")
+
+    @mcp.tool(annotations=READ)
+    async def game_metrics(ctx: Context, id: int) -> CallToolResult:
+        """One game's metrics: rounds, and for each metric the series for team A and B, plus the
+        eval (P(A wins)) per round. Use it to see where a game turned."""
+        return await api.call(ctx, "GET", f"/games/{id}/metrics")
+
+    @mcp.tool(annotations=READ)
+    async def submission_metrics(ctx: Context, id: str) -> CallToolResult:
+        """Each metric for this submission's side vs its opponents at rounds 50-400 and at the
+        end, averaged over its games: how it plays (does it keep dragons alive, control the
+        board, grow a long dragon, keep its queen?)."""
+        return await api.call(ctx, "GET", f"/submissions/{id}/metrics")
+
     @mcp.tool()
     async def retire(ctx: Context, id: str) -> CallToolResult:
         """Take a submission off the leaderboard (only its owner can): status retired, no longer
@@ -398,7 +417,8 @@ def make_server(app: FastAPI) -> MCPServer:
 
 
 TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
-         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "retire", "server_link", "lineage",
+         "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "retire", "server_link", "lineage", "metrics", "game_metrics",
+         "submission_metrics",
          "queue", "server_status",
          "server_battles",
          "server_battle", "server_leaderboard", "server_quota")

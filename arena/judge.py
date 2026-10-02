@@ -16,6 +16,13 @@ def run_game(map_path: str, bot_a: str, bot_b: str, seed: int, replay_dir: str, 
                         work_root=Path(work_root), timeout=timeout)
     except runner.JudgeError as e:
         return {"error": str(e)[:2000]}
-    return {"winner": r.winner, "rounds": r.rounds, "reason": r.reason,
-            "seconds": round(r.seconds, 1), "stats": stats.extract(r),
-            "replay": str(r.replay) if r.replay else None}
+    out = {"winner": r.winner, "rounds": r.rounds, "reason": r.reason,
+           "seconds": round(r.seconds, 1), "stats": stats.extract(r),
+           "replay": str(r.replay) if r.replay else None}
+    if r.replay:                       # in-game metrics, computed where the game was played
+        try:
+            from arena import metrics
+            out["metrics"] = metrics.compute(Path(r.replay).read_bytes())
+        except Exception as e:         # never lose a game over a metric
+            out["metrics_error"] = f"{type(e).__name__}: {e}"[:300]
+    return out

@@ -9,7 +9,8 @@ from fastapi.responses import PlainTextResponse
 from arena.config import ROOT
 from arena.web import markdown
 
-DOCS = {"": ("TEAMMATES.md", "Guide"), "agents": ("AGENTS.md", "Agent brief")}
+DOCS = {"": ("TEAMMATES.md", "Guide"), "agents": ("AGENTS.md", "Agent brief"),
+        "metrics": ("METRICS.md", "Metrics")}
 
 EXTRA_CSS = """
 .doc { max-width: 900px; line-height: 1.55; }
