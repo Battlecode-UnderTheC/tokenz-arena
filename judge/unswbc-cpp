@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-BINARIES = [HERE / "build" / "cppjudge", pathlib.Path("/usr/local/lib/cppjudge/cppjudge")]
+BINARIES = [HERE / "build" / "cppjudge", HERE / "cppjudge", pathlib.Path("/usr/local/lib/cppjudge/cppjudge")]
 FLAGS = {"-v", "--verbose", "--sandbox", "--no-replay"}
 VALUED = {"-o", "--output", "--replay", "--seed"}
 

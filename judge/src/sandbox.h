@@ -5,6 +5,7 @@
 
 #include <wasmtime.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
@@ -162,5 +163,6 @@ struct Dragon {
 };
 
 std::string utf8_replace(const std::string &s);
+extern std::atomic<int64_t> STAT_INST_NS, STAT_THREAD_NS, STAT_BOXES;
 
 }  // namespace cj

@@ -437,7 +437,7 @@ struct Engine {
 
 struct Args {
   std::string map, name_a, name_b, wasm_a, wasm_b, engine, output;
-  bool verbose = false, no_replay = false, has_seed = false;
+  bool verbose = false, no_replay = false, has_seed = false, stats = false;
   uint64_t seed = 0;
   int debug = DEBUG_ALL | DEBUG_LIMITS;
 };
@@ -446,7 +446,8 @@ void usage() {
   fprintf(stderr,
           "usage: cppjudge run MAP NAME_A NAME_B --wasm-a A.wasm --wasm-b B.wasm --engine unswbc_engine.wasm\n"
           "                [--seed S] [-v] [-o OUT] [--no-replay] [--debug N]\n"
-          "       cppjudge imports BOT.wasm   (exit 3 and list what this host lacks)\n");
+          "       cppjudge imports BOT.wasm   (exit 3 and list what this host lacks)\n"
+          "       cppjudge warm-engine unswbc_engine.wasm\n");
   _exit(2);
 }
 
@@ -640,6 +641,13 @@ int run(const Args &args) {
   fclose(f);
   say("wrote replay: " + path);
   flush_out();
+  if (args.stats) {
+    timespec ts;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    fprintf(stderr, "stats: main thread cpu %.3fs, workers %lld, worker cpu %.3fs (instantiate %.3fs)\n",
+            ts.tv_sec + ts.tv_nsec / 1e9, (long long)STAT_BOXES.load(), STAT_THREAD_NS.load() / 1e9,
+            STAT_INST_NS.load() / 1e9);
+  }
   return 0;
 }
 
@@ -658,6 +666,14 @@ int main(int argc, char **argv) {
     } catch (std::exception &e) {
       die(e.what());
     }
+  }
+  if (a.size() == 2 && a[0] == "warm-engine") {  // compile and cache the engine module
+    try {
+      load_module(wasm_engine_new(), a[1], "engine");
+    } catch (std::exception &e) {
+      die(e.what());
+    }
+    _exit(0);
   }
   if (a.empty() || a[0] != "run") usage();
   Args args;
@@ -685,6 +701,7 @@ int main(int argc, char **argv) {
     else if (s == "--wasm-b") args.wasm_b = val();
     else if (s == "--engine") args.engine = val();
     else if (s == "--debug") args.debug = std::stoi(val());
+    else if (s == "--stats") args.stats = true;
     else if (s == "--sandbox") {
     } else pos.push_back(s);
   }

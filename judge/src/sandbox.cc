@@ -9,6 +9,8 @@
 #include <map>
 #include <stdexcept>
 #include <thread>
+#include <atomic>
+#include <ctime>
 
 #include "sha256.h"
 
@@ -415,7 +417,21 @@ static std::string trap_text(wasm_trap_t *trap, wasmtime_error_t *err) {
   return s;
 }
 
+std::atomic<int64_t> STAT_INST_NS{0}, STAT_THREAD_NS{0}, STAT_BOXES{0};
+
+static int64_t thread_ns() {
+  timespec ts;
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
 void Box::run() {
+  int64_t t0 = thread_ns();
+  STAT_BOXES++;
+  struct Done {
+    int64_t t0;
+    ~Done() { STAT_THREAD_NS += thread_ns() - t0; }
+  } done{t0};
   // Sandbox.__init__ + instantiate()
   store = wasmtime_store_new(team->engine, this, nullptr);
   ctx = wasmtime_store_context(store);
@@ -470,6 +486,7 @@ void Box::run() {
     return;
   }
 
+  STAT_INST_NS += thread_ns() - t0;
   // Sandbox._enter(_start)
   pending = NONE;
   wasm_trap_t *trap = nullptr;
