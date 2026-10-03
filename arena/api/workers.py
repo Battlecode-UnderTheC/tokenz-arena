@@ -94,9 +94,14 @@ def make_router(arena: Arena) -> APIRouter:
             with open(fd, "wb") as f:
                 f.write(await replay.read())
             path = Path(tmp)
-        res = {k: m.get(k) for k in ("winner", "rounds", "reason", "seconds", "stats", "error", "metrics")}
+        res = {k: m.get(k) for k in ("winner", "rounds", "reason", "seconds", "stats", "error", "metrics",
+                                     "judge", "judge_check")}
         if res["winner"] not in ("A", "B", None):
             raise HTTPException(400, "winner must be A, B or null")
+        if res["judge"] not in ("official", "cpp", None) or res["judge_check"] not in ("same", "different", None):
+            raise HTTPException(400, "judge must be official or cpp, judge_check same or different")
+        if res["judge"] is None:
+            res.pop("judge")                       # an older worker: the official judge
         out = call(reg().result, str(m["worker"])[:64], tok, str(m["lease"]), res, path)
         if path is not None and path.exists():
             path.unlink()                                   # not recorded (a duplicate)

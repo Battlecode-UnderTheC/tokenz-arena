@@ -116,3 +116,19 @@ def test_scaler_tokens_work_on_every_route_and_revoked_ones_dont(setup):
         t["vast-x"]["revoked"] = True
     assert c.post("/api/v1/workers/lease", json=hello(worker="vast-x"), headers=h).status_code == 401
     assert c.get(f"/api/v1/workers/bot/{subs[0].id}", headers=h).status_code == 401
+
+
+def test_remote_results_keep_which_judge_played(setup, tmp_path):
+    """A worker's result says which judge played the game and how its spot check went; both are
+    recorded (they were once dropped, so every remote game read as the official judge's)."""
+    a, d, c, _ = setup
+    a.cfg.raw["play"].update({"judge": "cpp", "judge_check_every": 1})
+    l = c.post("/api/v1/workers/lease", json=hello(want=1), headers=TOKEN).json()["leases"][0]
+    assert l["game"]["judge"] == "cpp" and l["game"]["check"] is True
+    meta = {"lease": l["lease"], "worker": "w1", "winner": "A", "rounds": 77, "reason": "elimination",
+            "seconds": 3.0, "stats": {}, "judge": "cpp", "judge_check": "same"}
+    assert c.post("/api/v1/workers/result", data={"meta": json.dumps(meta)}, headers=TOKEN).json()["recorded"]
+    g = a.games[-1]
+    assert g.meta["judge"] == "cpp" and g.meta["judge_check"] == "same"
+    bad = {**meta, "judge": "native"}
+    assert c.post("/api/v1/workers/result", data={"meta": json.dumps(bad)}, headers=TOKEN).status_code == 400
