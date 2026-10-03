@@ -32,10 +32,26 @@ def _one(replay: str) -> dict | None:
         return {"error": f"{type(e).__name__}: {e}"[:300]}
 
 
+# Games whose stored metrics are known current for these metric versions: each file is read
+# once, not on every run (reading all ~60k files every 5 s kept the engine's process busy and its
+# API slow). A metric version change starts over.
+_current: set[int] = set()
+_versions: tuple = ()
+
+
+def _known(gid: int):
+    _current.add(gid)
+
+
 def todo(arena, limit: int) -> list:
+    global _versions
+    v = tuple(sorted(metrics.versions().items()))
+    if v != _versions:
+        _current.clear()
+        _versions = v
     d = arena.cfg.data_dir / "metrics"
     with arena.lock:
-        games = [g for g in arena.games if g.replay]
+        games = [g for g in arena.games if g.replay and g.id not in _current]
     games.sort(key=lambda g: (g.lane != "server", -g.id))
     out = []
     for g in games:
@@ -43,6 +59,7 @@ def todo(arena, limit: int) -> list:
         if p.exists():
             stored = store.read_json(p, None)
             if stored and (stored.get("error") or not metrics.outdated(stored)):
+                _known(g.id)
                 continue
         out.append(g)
         if len(out) >= limit:
@@ -72,6 +89,9 @@ def _run_native(arena, batch: int):
     d.mkdir(parents=True, exist_ok=True)
     pairs = [(arena.cfg.replays / g.replay, d / f"{g.id}.json") for g in games]
     res = native.compute_files(pairs, threads=_procs(arena), nice=15)
+    for g, (replay, _) in zip(games, pairs):
+        if str(replay) in res:                   # written: metrics or the error it hit
+            _known(g.id)
     done = sum(1 for v in res.values() if v == "ok")
     if done:
         log.info("metrics: backfilled %d games (native)", done)
@@ -89,6 +109,7 @@ def _run(arena, batch: int):
         r = f.result()
         if r is not None:
             store.write_json(arena.cfg.data_dir / "metrics" / f"{gid}.json", r)
+            _known(gid)
             done += 1
     if done:
         log.info("metrics: backfilled %d games", done)
