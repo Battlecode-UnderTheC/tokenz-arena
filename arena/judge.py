@@ -10,13 +10,14 @@ from pathlib import Path
 from arena import runner, stats
 
 
-def spot_check(cfg, key: str) -> bool:
+def spot_check(cfg, key) -> bool:
     """Whether this game, played with cppjudge, is also played by the official judge and the two
-    compared: one game in [play] judge_check_every (default 50), picked by its key."""
+    compared: one game in [play] judge_check_every (default 50), picked by its key (a Job.key
+    tuple: a, b, suite, map, seed)."""
     every = int(cfg.get("play", "judge_check_every", 50) or 0)
     if cfg.get("play", "judge", "official") != "cpp" or every <= 0:
         return False
-    return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % every == 0
+    return int(hashlib.sha256(repr(key).encode()).hexdigest()[:8], 16) % every == 0
 
 
 def run_game(map_path: str, bot_a: str, bot_b: str, seed: int, replay_dir: str, work_root: str,

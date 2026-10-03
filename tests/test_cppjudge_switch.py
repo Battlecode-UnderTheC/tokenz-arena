@@ -83,6 +83,17 @@ def test_spot_check_picks_one_in_every():
     from arena.config import Config
     from arena.judge import spot_check
     cfg = Config(raw={"play": {"judge": "cpp", "judge_check_every": 10}})
-    picked = sum(spot_check(cfg, f"g{i}") for i in range(5000))
+    picked = sum(spot_check(cfg, ("a", "b", "official", "m", i)) for i in range(5000))   # Job.key
     assert 400 < picked < 600
     assert not spot_check(Config(raw={"play": {"judge": "official"}}), "g1")
+
+
+def test_spot_checks_through_the_engine_and_leases(tmp_path):
+    """The real callers pass a scheduler.Job's key (a tuple), on the engine and in a lease."""
+    from arena.config import Config
+    from arena.judge import spot_check
+    from arena import scheduler
+    job = scheduler.Job(priority=0, a="x", b="y", suite="official", map=str(tmp_path / "m.map"), seed=1,
+                        owner="o", for_sub="x")
+    cfg = Config(raw={"play": {"judge": "cpp", "judge_check_every": 1}})
+    assert spot_check(cfg, job.key) is True
