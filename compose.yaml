@@ -2,6 +2,10 @@
 #   cp deploy/env.example .env   (TS_AUTHKEY, paths)   then: docker compose up -d --build
 # The engine and the website share the sidecar's network namespace and listen on 127.0.0.1
 # only, so the one way in is `tailscale serve` (HTTPS on the tailnet) to the website.
+#
+# oom_score_adj: poscatgpu2 is shared, and when another user's jobs fill its memory the kernel
+# kills processes to free some. These make it pick other processes before the arena's (lower is
+# kept longer; ordinary processes are 0). The judge processes the engine starts inherit its value.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -15,6 +19,7 @@ services:
       - ts-state:/var/lib/tailscale
       - ./deploy/serve.json:/config/serve.json:ro
     restart: unless-stopped
+    oom_score_adj: -800        # the arena's only way in
 
   # The engine: the only writer (scheduler, judge worker processes, server bridge), with an
   # internal API on 127.0.0.1:8701 that the website forwards writes to.
@@ -34,6 +39,7 @@ services:
       - ${ARENA_SECRETS:-~/.config/tokenz-arena}:/secrets:ro
     restart: unless-stopped
     stop_grace_period: 30s
+    oom_score_adj: -500
 
   # The website, API and MCP on 127.0.0.1:8700 (behind tailscale serve): a read-only copy of
   # the state, refreshed every second. It runs no games, so pages stay fast.
@@ -58,6 +64,7 @@ services:
     command: ["arena", "evals", "--config", "/data/arena.toml"]
     depends_on: [tailscale]
     stop_grace_period: 5s
+    oom_score_adj: -100        # the least needed of the arena's processes
 
 volumes:
   ts-state:
