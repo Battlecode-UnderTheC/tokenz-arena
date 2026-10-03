@@ -97,3 +97,22 @@ def test_spot_checks_through_the_engine_and_leases(tmp_path):
                         owner="o", for_sub="x")
     cfg = Config(raw={"play": {"judge": "cpp", "judge_check_every": 1}})
     assert spot_check(cfg, job.key) is True
+
+
+def test_same_named_replays_of_two_games_do_not_collide(tmp_path, monkeypatch):
+    """The judge names replays <matchup>-on-<map>-<second>: two games of one pair on one map in
+    the same second must still each keep their own replay."""
+    def run(cmd, cwd=None, **kw):
+        out = Path(cmd[cmd.index("-o") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        seed = cmd[cmd.index("--seed") + 1]
+        (out / "a-vs-b-on-m-20261003-204436.replay").write_text(seed)       # the same name both times
+        return subprocess.CompletedProcess(cmd, 0, WIN, "")
+    monkeypatch.setattr(runner, "prebuild", lambda bot: None)
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    for t in "ab":
+        (tmp_path / t).mkdir()
+    r1 = runner.play(tmp_path / "m.map", tmp_path / "a", tmp_path / "b", 111, tmp_path / "replays", work_root=tmp_path / "w")
+    r2 = runner.play(tmp_path / "m.map", tmp_path / "a", tmp_path / "b", 222, tmp_path / "replays", work_root=tmp_path / "w")
+    assert r1.replay != r2.replay
+    assert r1.replay.read_text() == "111" and r2.replay.read_text() == "222"

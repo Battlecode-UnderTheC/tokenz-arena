@@ -179,7 +179,10 @@ def play(map_path: Path, bot_a: Path, bot_b: Path, seed: int, replay_dir: Path,
                 official.judge, official.check = "official", "different"
                 result, replay = official, official_replay
         if replay:
-            dest = replay_dir / replay.name
+            # A name of this game's own: the judge names a replay <matchup>-on-<map>-<time to the
+            # second>, so two games of one pair on one map finishing in the same second (several
+            # seeds per map, many slots) overwrote each other here, and a game kept another's replay.
+            dest = replay_dir / f"{Path(work).name}-{seed}.replay"
             shutil.move(str(replay), dest)
             result.replay = dest
         else:
