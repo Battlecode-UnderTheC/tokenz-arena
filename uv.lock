@@ -723,7 +723,7 @@ requires-dist = [
     { name = "bcweb", marker = "extra == 'server'", git = "ssh://git@github.com/Battlecode-UnderTheC/bcweb.git" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "mcp", specifier = ">=1.2" },
-    { name = "unswbc", specifier = "==1.2.7" },
+    { name = "unswbc", specifier = "==1.2.9" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 provides-extras = ["server"]
@@ -763,13 +763,13 @@ wheels = [
 
 [[package]]
 name = "unswbc"
-version = "1.2.7"
+version = "1.2.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "wasmtime" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/e5/4f3173d965f735cdab1a9db6c8e62c2daab26cd95d14d9863a628f300c3a/unswbc-1.2.7-py3-none-any.whl", hash = "sha256:87e2988cd9feea3d246140648ab73f276f56c890b241eab3a458c35085410a68", size = 55614833, upload-time = "2026-10-02T04:39:53.308Z" },
+    { url = "https://files.pythonhosted.org/packages/17/3f/07577d60df629c1842160d39b8f7248a39188d11c53bd35fe279a2251349/unswbc-1.2.9-py3-none-any.whl", hash = "sha256:0f80169067a62a2ca3d082780320bfc67f9d63f17e0c1c12b6e50ead7bad65a0", size = 55615282, upload-time = "2026-10-03T06:59:31.784Z" },
 ]
 
 [[package]]

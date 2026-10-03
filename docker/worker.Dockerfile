@@ -1,7 +1,7 @@
 # The worker image for rented machines (docs/SCALER.md): only what `arena worker` needs, the
 # official judge (unswbc, with the engine's wasmtime), cppjudge and Tailscale. No website, engine, MCP,
 # bcweb or build tools. Built and pushed by deploy/update.sh:
-#   docker build -f docker/worker.Dockerfile --build-arg UNSWBC=1.2.7 --build-arg WASMTIME=49.0.0 .
+#   docker build -f docker/worker.Dockerfile --build-arg UNSWBC=1.2.9 --build-arg WASMTIME=49.0.0 .
 
 # cppjudge (judge/): the C++ host for the judge's wasm bots, against the wasmtime C API of the
 # same release as the judge's wasmtime wheel; it loads the wheel's own libwasmtime at run time.

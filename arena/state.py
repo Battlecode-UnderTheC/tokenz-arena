@@ -278,8 +278,9 @@ except PackageNotFoundError:
     ENGINE = "unknown"
 FIRST_ENGINE = "1.2.3"                    # games recorded before games carried their engine
 # Toolkit releases whose judge is byte-identical to an earlier one's (same rules, same results):
-# their games stay comparable. 1.2.4-1.2.7 changed only the bundled maps and the replay viewer.
-SAME_RULES = {"1.2.7": "1.2.3"}
+# their games stay comparable. 1.2.4-1.2.7 changed only the bundled maps and the replay viewer;
+# 1.2.9 only its version string and the replay viewer (engine, judge and sandbox byte-identical).
+SAME_RULES = {"1.2.7": "1.2.3", "1.2.9": "1.2.3"}
 MAP_CFG: list = [None]                    # the arena's config, for current_map (set by Arena)
 
 RATED_LANES = {"draft", "placement", "continuous"}
