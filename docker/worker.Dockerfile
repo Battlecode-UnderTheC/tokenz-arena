@@ -5,6 +5,12 @@
 
 # cppjudge (judge/): the C++ host for the judge's wasm bots, against the wasmtime C API of the
 # same release as the judge's wasmtime wheel; it loads the wheel's own libwasmtime at run time.
+# arena-metrics (native/metrics): the metrics in C++. Only the binary leaves this stage.
+FROM python:3.12-slim AS metrics
+RUN apt-get update && apt-get install -y --no-install-recommends g++ zlib1g-dev && rm -rf /var/lib/apt/lists/*
+COPY native/metrics /src
+RUN STATIC=1 /src/build.sh /opt/arena-metrics/arena-metrics && /opt/arena-metrics/arena-metrics --describe > /dev/null
+
 FROM python:3.12-slim AS cppjudge
 ARG WASMTIME=49.0.0
 RUN apt-get update && apt-get install -y --no-install-recommends g++ curl xz-utils ca-certificates \
@@ -35,9 +41,10 @@ RUN pip install --no-cache-dir --no-compile "unswbc==${UNSWBC}" "wasmtime==${WAS
 # Only the worker's modules (all standard library): the rest of the arena isn't here.
 COPY arena/__init__.py arena/cli.py arena/worker.py arena/judge.py arena/runner.py arena/strictjudge.py arena/stats.py \
      arena/state.py arena/store.py arena/config.py arena/maps.py arena/submit.py /app/arena/
-COPY arena/metrics/__init__.py arena/metrics/state.py /app/arena/metrics/
+COPY arena/metrics/__init__.py arena/metrics/state.py arena/metrics/native.py /app/arena/metrics/
 COPY arena/metrics/plugins/ /app/arena/metrics/plugins/
 COPY docker/entrypoint.sh /app/docker/entrypoint.sh
+COPY --from=metrics /opt/arena-metrics /opt/arena-metrics
 # cppjudge, loading the judge's own libwasmtime (the wheel's file: the C API release's is the same)
 COPY --from=cppjudge /opt/cppjudge/cppjudge /opt/cppjudge/WASMTIME /opt/cppjudge/
 COPY judge/unswbc-cpp /opt/cppjudge/unswbc-cpp

@@ -1,6 +1,7 @@
 """Fills in metrics for games played before a metric existed (or whose metric version changed):
-a few games at a time, newest first (real server games before local ones), in two low-priority
-worker processes so the judges and the website never wait on it."""
+newest first (real server games before local ones), at low priority so the judges and the website
+never wait on it. With arena-metrics (native/metrics) it does thousands of games per batch; without
+it, a few at a time in low-priority Python processes."""
 
 from __future__ import annotations
 
@@ -53,9 +54,27 @@ def run(arena, batch: int | None = None):
     if not _BUSY.acquire(blocking=False):          # the previous batch is still going
         return
     try:
-        _run(arena, batch or 6 * _procs(arena))
+        from arena.metrics import native
+        if native.usable():
+            _run_native(arena, batch or 2000)
+        else:
+            _run(arena, batch or 6 * _procs(arena))
     finally:
         _BUSY.release()
+
+
+def _run_native(arena, batch: int):
+    """A batch in arena-metrics (C++): thousands of games a minute, on [metrics] backfill_procs
+    threads at low priority."""
+    from arena.metrics import native
+    games = todo(arena, batch)
+    d = arena.cfg.data_dir / "metrics"
+    d.mkdir(parents=True, exist_ok=True)
+    pairs = [(arena.cfg.replays / g.replay, d / f"{g.id}.json") for g in games]
+    res = native.compute_files(pairs, threads=_procs(arena), nice=15)
+    done = sum(1 for v in res.values() if v == "ok")
+    if done:
+        log.info("metrics: backfilled %d games (native)", done)
 
 
 def _run(arena, batch: int):

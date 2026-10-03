@@ -8,3 +8,4 @@ arena.toml
 !tests/data/*.replay
 .deployed
 judge/build/
+native/metrics/build/

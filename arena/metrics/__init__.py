@@ -221,7 +221,22 @@ def queen_cause(reason: str, detail: str) -> str:
 
 
 def compute(blob: bytes, every: int = EVERY) -> dict:
-    """All registered metrics for one replay (plain or gzip bytes)."""
+    """All registered metrics for one replay (plain or gzip bytes): in C++ (arena/metrics/native.py)
+    when it has every registered metric at its version, else in Python."""
+    if every == EVERY:
+        from arena.metrics import native
+        if native.usable():
+            try:
+                return native.compute(blob)
+            except Exception as e:                       # never lose a game's metrics to it
+                import logging
+                logging.getLogger("arena").warning("arena-metrics failed (%s): computing in Python", e)
+    return compute_python(blob, every)
+
+
+def compute_python(blob: bytes, every: int = EVERY) -> dict:
+    """compute() in Python: the reference for arena-metrics (native/metrics), and what runs where
+    that binary isn't, or when a Python metric isn't in it yet."""
     from arena.metrics import state as S
     reg = load_plugins()
     team_metrics = [m for m in reg.values() if not m.derived]

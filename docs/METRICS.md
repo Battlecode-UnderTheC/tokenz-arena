@@ -127,3 +127,26 @@ Check one locally before pushing:
 uv run python -c "from arena import metrics; import json; \
   print(json.dumps(metrics.compute(open('tests/data/colosseum-seed1.replay','rb').read())['team']['tail_room']))"
 ```
+
+## Native metrics (arena-metrics)
+
+`native/metrics/` computes the same metrics in C++, about 50x faster than Python: roughly 20-30 ms
+a game on one core, mostly reading the replay (a 1 MB file gunzips to 4 MB and unpacks to 10 MB),
+so thousands of games a minute on poscatgpu2. Each metric is a small self-registering function in
+`native/metrics/plugins/`, the twin of a Python `@metric`:
+
+```cpp
+METRIC(tiles_visited, 300, "Tiles visited", "share of the board's tiles ...", 1, "share", "higher") {
+    return Value::real(double(ctx.explored(t).visited_count) / ctx.tiles());
+}
+```
+
+The Python plugins stay the reference and the place to try a metric first. `metrics.compute()`
+uses the binary only when it has every registered Python metric at the same version
+(`arena/metrics/native.py usable()`), so a new or changed Python metric simply runs in Python
+until its C++ twin exists. To port one: write it in `native/metrics/plugins/`, then
+`native/metrics/build.sh` and `python native/metrics/parity.py REPLAY...`, which must report every
+replay identical; the test suite also compares both on a test replay when the binary is built.
+
+The images build it in a stage of their own (only the 2 MB binary ships). The backfill uses it in
+batches of 2,000 games on [metrics] backfill_procs threads at low priority.

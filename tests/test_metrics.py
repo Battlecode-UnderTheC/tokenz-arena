@@ -87,3 +87,18 @@ def test_exploration_metrics_grow_and_views_wrap():
             assert s == sorted(s) and 0 < s[0] and s[-1] <= 1          # only ever grows
         assert all(m["team"]["tiles_seen"][t][i] >= m["team"]["tiles_visited"][t][i]
                    for t in "AB" for i in range(len(m["rounds"])))     # a head sees where it stands
+
+
+def test_native_metrics_match_python_when_built():
+    """arena-metrics (native/metrics, built with native/metrics/build.sh) gives exactly the Python
+    metrics, and lists the same metrics with the same descriptions. Skipped where it isn't built."""
+    import pytest
+    from pathlib import Path
+    from arena import metrics
+    from arena.metrics import native
+    if native.binary() is None:
+        pytest.skip("arena-metrics isn't built here")
+    blob = (Path(__file__).parent / "data" / "colosseum-seed1.replay").read_bytes()
+    assert native.compute(blob) == metrics.compute_python(blob)
+    assert list(native.describe()) == metrics.describe()
+    assert native.usable()
