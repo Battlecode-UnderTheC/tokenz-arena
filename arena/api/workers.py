@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from arena import scheduler
 from arena.state import Arena
@@ -102,7 +103,9 @@ def make_router(arena: Arena) -> APIRouter:
             raise HTTPException(400, "judge must be official or cpp, judge_check same or different")
         if res["judge"] is None:
             res.pop("judge")                       # an older worker: the official judge
-        out = call(reg().result, str(m["worker"])[:64], tok, str(m["lease"]), res, path)
+        # recorded in a worker thread: storing and compressing the replay takes a moment, and on
+        # the server's own thread it held up every other request
+        out = await run_in_threadpool(call, reg().result, str(m["worker"])[:64], tok, str(m["lease"]), res, path)
         if path is not None and path.exists():
             path.unlink()                                   # not recorded (a duplicate)
         return out

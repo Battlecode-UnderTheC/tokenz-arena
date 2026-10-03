@@ -22,6 +22,7 @@ from arena import judge, judge_checks, queue, rating, scheduler, store, submit
 from arena.state import CHECKING, ENGINE, Arena, Game, now
 
 log = logging.getLogger("arena")
+RATE_SECONDS = 15
 
 
 class Daemon:
@@ -46,6 +47,11 @@ class Daemon:
         self.registry = None                 # arena.workers.Registry once remote workers are enabled
         self.paused_remote = False
         self._snapshot_at = 0.0
+        # Ratings are refit at most every RATE_SECONDS, not after each game: a refit reads every
+        # game, and doing it per result (about one a second with a rented machine) kept the
+        # engine's process busy enough that its API took 10-20 s.
+        self._rate_due = False
+        self.every(RATE_SECONDS, self._rate_if_due, "ratings")
 
     def install_maps(self):
         """Keeps the worldgen suites current: this week's rotating maps and the holdout."""
@@ -191,9 +197,14 @@ class Daemon:
             a.save_game(g)
         log.info("game %d %s vs %s on %s (%s): %s", g.id, g.a, g.b, g.map, worker,
                  g.error or g.winner or "draw")
-        self.rate()
+        self._rate_due = True
         self.wake.set()
         return True
+
+    def _rate_if_due(self):
+        if self._rate_due:
+            self._rate_due = False
+            self.rate()
 
     def rate(self):
         r = rating.fit(self.arena)
