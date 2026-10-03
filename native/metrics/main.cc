@@ -3,6 +3,7 @@
 //   arena-metrics --describe                 the metrics, as JSON (what metrics.describe() lists)
 //   arena-metrics REPLAY|-                   one replay's metrics (- reads it from stdin), JSON on stdout
 //   arena-metrics --bench REPLAY...          where one thread's time goes
+//   arena-metrics --info < paths             each replay's seed and bots: "path<TAB>seed<TAB>botA<TAB>botB"
 //   arena-metrics [-j N] < pairs             each stdin line "REPLAY<TAB>OUT.json": writes OUT.json
 //                                            (atomically), then prints "ok REPLAY" or "error REPLAY: why"
 // A replay that can't be read gets {"error": "native: ..."} in its OUT.json, as the Python backfill
@@ -53,6 +54,16 @@ int main(int argc, char** argv) {
     std::printf("%zu games, %.1f ms each: gunzip %.1f, unpack %.1f, walk %.1f, snapshots %.1f\n", blobs.size(),
                 1000 * total / blobs.size(), 1000 * p.inflate / blobs.size(), 1000 * p.unpack / blobs.size(),
                 1000 * p.walk / blobs.size(), 1000 * p.snapshots / blobs.size());
+    return 0;
+  }
+  if (args.size() >= 1 && args[0] == "--info") {        // each stdin path: "path<TAB>seed<TAB>botA<TAB>botB"
+    for (std::string path; std::getline(std::cin, path);) {
+      try {
+        std::cout << path << "\t" << am::replay_info(slurp(path)) << "\n";
+      } catch (std::exception& e) {
+        std::cout << path << "\terror: " << e.what() << "\n";
+      }
+    }
     return 0;
   }
   int threads = (int)std::thread::hardware_concurrency();

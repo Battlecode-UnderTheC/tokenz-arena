@@ -772,6 +772,30 @@ Result compute(const std::string& file_bytes) {
   return out;
 }
 
+// ---- a replay's header: seed and bots (arena-metrics --info) -------------------------------------
+std::string replay_info(const std::string& file_bytes) {
+  thread_local std::string gunzipped;
+  thread_local std::vector<uint64_t> words;
+  const bool gz = file_bytes.size() >= 2 && (unsigned char)file_bytes[0] == 0x1f && (unsigned char)file_bytes[1] == 0x8b;
+  if (gz) inflate_gzip(file_bytes, gunzipped);
+  const std::string& blob = gz ? gunzipped : file_bytes;
+  unpack(blob.data(), blob.size(), words);
+  if (words.empty()) throw std::runtime_error("empty replay");
+  Msg m{words, {}};
+  uint32_t nseg = uint32_t(m.words[0] & 0xFFFFFFFF) + 1;
+  size_t w = (4 + 4 * nseg + 7) / 8;
+  for (uint32_t s = 0; s < nseg; s++) {
+    size_t half = 1 + s;
+    uint64_t hw = m.words.at(half / 2);
+    m.base.push_back(w);
+    w += uint32_t(half % 2 ? hw >> 32 : hw & 0xFFFFFFFF);
+  }
+  auto rp = m.resolve(0, 0);
+  Struct root{&m, rp.seg, rp.target, unsigned((rp.w >> 32) & 0xFFFF), unsigned((rp.w >> 48) & 0xFFFF)};
+  std::string seed = root.u16(4) == 1 ? std::to_string(root.u64(8)) : "-";
+  return seed + "\t" + root.text(1) + "\t" + root.text(2);
+}
+
 // ---- JSON (the shape compute() returns) ------------------------------------------------------------
 static void put_str(std::string& o, const std::string& s) {
   o += '"';

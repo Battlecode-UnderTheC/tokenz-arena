@@ -38,6 +38,7 @@ extern PhaseTimes phase_times;   // summed over compute() calls, for --bench (on
 Map parse_map(const std::string& text);
 Result compute(const std::string& file_bytes);   // a replay file's bytes, plain or gzip
 std::string to_json(const Result& r);
-std::string describe_json();                     // the registry, as metrics.describe() lists it
+std::string describe_json();
+std::string replay_info(const std::string& file_bytes);   // "seed<TAB>botA<TAB>botB"                     // the registry, as metrics.describe() lists it
 
 }  // namespace am
