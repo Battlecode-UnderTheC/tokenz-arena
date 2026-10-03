@@ -16,6 +16,14 @@ Where you see them:
 They're computed right after each game on whichever machine played it (about 1-4 seconds, a
 few percent of a game), and for older games by a low-priority background task.
 
+Two metrics measure exploration on its own, whatever the opponent does: **tiles visited** (the
+share of the board's tiles the team's dragon heads have stood on, every tile of a sprint
+included) and **tiles seen** (the share that has been in one of its dragons' 7x7 views, which
+wrap around the board's edges as in the engine). Both only grow. Tiles seen saturates early when
+a team has many dragons (about 94% by round 100 in a typical long game); tiles visited keeps
+separating teams later. **Board control** is the relative one: the share of tiles a team's heads
+reach before the enemy's.
+
 ## What predicts winning (and why these metrics)
 
 From ~8,500 arena games and 258 real competition games under unswbc 1.2.3:

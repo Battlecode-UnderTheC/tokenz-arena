@@ -71,3 +71,19 @@ def test_pearl_rate_is_pearls_over_the_last_50_rounds():
     assert eaten[j] == 0 and rate[i] == round(eaten[i] / 50, 4)
     k = rounds.index(40)                               # fewer than 50 rounds: per round so far
     assert rate[k] == round(eaten[k] / 40, 4)
+
+
+def test_exploration_metrics_grow_and_views_wrap():
+    from pathlib import Path
+    from arena import metrics
+    from arena.metrics import state as S
+    g = S.GameMap("MAP 10 8\n")
+    v = metrics.view(g, (0, 0))
+    assert len(set(v)) == 49 and (9, 7) in v and (3, 3) in v and (4, 0) not in v   # wraps, radius 3
+    m = metrics.compute((Path(__file__).parent / "data" / "colosseum-seed1.replay").read_bytes())
+    for k in ("tiles_visited", "tiles_seen"):
+        for t in "AB":
+            s = m["team"][k][t]
+            assert s == sorted(s) and 0 < s[0] and s[-1] <= 1          # only ever grows
+        assert all(m["team"]["tiles_seen"][t][i] >= m["team"]["tiles_visited"][t][i]
+                   for t in "AB" for i in range(len(m["rounds"])))     # a head sees where it stands

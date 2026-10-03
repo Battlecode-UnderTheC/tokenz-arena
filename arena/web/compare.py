@@ -14,7 +14,8 @@ from arena.metrics import compare as C
 COL = {"a": "#2f7fd6", "b": "#d9822b"}
 TITLES = {"eval": "Win chance (eval)", "dragons": "Dragons alive", "total_length": "Total length",
           "longest": "Longest dragon", "board_control": "Board control", "pearl_rate": "Pearl rate (per round)",
-          "queen_length": "Queen length", "queen_room": "Queen room", "queen_danger": "Queen's distance to enemy"}
+          "queen_length": "Queen length", "queen_room": "Queen room", "queen_danger": "Queen's distance to enemy",
+          "tiles_visited": "Tiles visited (share of board)", "tiles_seen": "Tiles seen (share of board)"}
 CSS = """
 .cmp-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 8px 0 16px; }
 .cmp-form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }

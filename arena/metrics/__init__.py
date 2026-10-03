@@ -106,12 +106,15 @@ class Ctx:
     past    {team: [Counter after round 1, after round 2, ...]}: the counters round by round,
             for rates (ctx.rate)
     queens  {team: dragon id of its queen}
+    explored {team: {"visited": set of tiles its heads have stood on, "seen": set of tiles that
+            were in one of its dragons' views}} since the start
     cache   a dict shared by all metrics at this round (for expensive things like BFS)
     """
 
-    def __init__(self, st, g, rnd, cum, queens, past=None):
+    def __init__(self, st, g, rnd, cum, queens, past=None, explored=None):
         self.st, self.g, self.rnd, self.cum, self.queens = st, g, rnd, cum, queens
         self.past = past or {"A": [], "B": []}
+        self.explored = explored or {t: {"visited": set(), "seen": set()} for t in "AB"}
         self.cache: dict = {}
 
     @staticmethod
@@ -178,6 +181,19 @@ class Ctx:
 
 # ---------------------------------------------------------------------------- computing
 
+VISION = 7               # engine/types.h VISION_SIZE: a dragon sees the 7x7 tiles around its head
+
+
+def view(g, tile, _cache={}) -> tuple:
+    """The tiles a dragon with its head on `tile` sees (protocol.cc VisionTileAt: centred on the
+    head, wrapping around the board's edges, not turned with the dragon)."""
+    key = (g.W, g.H, tile)
+    if key not in _cache:
+        r, (x, y) = VISION // 2, tile
+        _cache[key] = tuple(((x + dx) % g.W, (y + dy) % g.H) for dy in range(-r, r + 1) for dx in range(-r, r + 1))
+    return _cache[key]
+
+
 QUEEN_CAUSES = ["hit a wall", "ran into itself", "ran into an enemy", "ran into an ally",
                 "head-on: an enemy moved into it", "head-on: lunged by an enemy",
                 "head-on: moved into an enemy", "head-on: moved into an ally", "head-on: an ally moved into it",
@@ -218,13 +234,16 @@ def compute(blob: bytes, every: int = EVERY) -> dict:
     queen_ids = {i: t for t, i in queens.items()}
     cum = {t: collections.Counter() for t in "AB"}
     past = {t: [] for t in "AB"}
+    explored = {t: {"visited": set(), "seen": set()} for t in "AB"}
+    for t, body in g.dragons:                  # where each team starts
+        explored[t]["visited"].add(body[0])
     rounds: list[int] = []
     team_series = {m.name: {"A": [], "B": []} for m in team_metrics}
     game_series = {m.name: [] for m in game_metrics}
     errors: dict[str, str] = {}
 
     def snapshot(st, rnd):
-        ctx = Ctx(st, g, rnd, cum, queens, past)
+        ctx = Ctx(st, g, rnd, cum, queens, past, explored)
         values = {}
         for m in team_metrics:
             v = {}
@@ -251,6 +270,10 @@ def compute(blob: bytes, every: int = EVERY) -> dict:
         if kind == "turn":
             t = info["team"]
             cum[t]["eat"] += info["ate"]
+            ex = explored[t]                    # it saw the board around its head, then moved
+            ex["seen"].update(view(g, info["head_before"]))
+            ex["visited"].add(info["head_before"])
+            ex["visited"].update(info["path"])
             act = info["action"]
             if act and act[0] == "move":
                 free = -(-info["len_before"] // 4)

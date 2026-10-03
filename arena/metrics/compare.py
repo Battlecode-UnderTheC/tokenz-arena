@@ -19,7 +19,7 @@ from arena.state import Arena, is_rated
 ROUNDS = list(range(10, 501, 10))
 PHASES = (("early", 1, 150), ("mid", 151, 350), ("late", 351, 500))
 CURVES = ["eval", "dragons", "total_length", "longest", "board_control", "pearl_rate", "queen_length",
-          "queen_room", "queen_danger"]
+          "queen_room", "queen_danger", "tiles_visited", "tiles_seen"]
 _CACHE: dict = {}
 _LOCK = threading.Lock()
 
