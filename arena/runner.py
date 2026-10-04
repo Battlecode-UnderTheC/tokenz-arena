@@ -205,8 +205,8 @@ def _judge(map_path: Path, a: Path, b: Path, seed: int, out: Path, work: str, ti
     start = time.monotonic()
     env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}   # plain output to parse
     # wasmtime compiles each bot with a rayon pool as big as the host (128-256 threads per game),
-    # so a few hundred games hit the container's task limit and the machine fell over; 8 a game
-    env.setdefault("RAYON_NUM_THREADS", "8")
+    # so a few hundred games hit the container's task limit and the machine fell over; 2 a game
+    env.setdefault("RAYON_NUM_THREADS", "2")
     env["PYTHONPATH"] = os.pathsep.join(p for p in (str(ROOT), env.get("PYTHONPATH")) if p)
     try:
         proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout,
