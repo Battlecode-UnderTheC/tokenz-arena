@@ -15,6 +15,9 @@ official = "<repo>/maps/official"
 rotating = "maps/rotating"
 holdout = "maps/holdout"
 server = "maps/server"
+rotating_mapgen = 10       # + this week's 20 worldgen maps (arena/maps.py)
+holdout_mapgen = 20        # + the 60 worldgen holdout maps
+holdout_trick = 8          # maps that break contest-map habits (mapgen --family trick)
 
 [seeds]
 official = [1592614637]
