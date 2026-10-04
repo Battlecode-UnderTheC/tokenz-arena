@@ -328,3 +328,17 @@ def test_a_machine_that_failed_us_is_skipped_for_a_while(make):
     assert vast.created[-1][0] != offer                   # the next rental is another machine
     clock.t += 3 * 3600
     assert offer in {o["id"] for o in s.ranked_offers()}
+
+
+def test_oversized_machines_are_replaced_too(make):
+    s, vast, clock = make(slots_per_thread=4.0, ram_per_slot_gb=0.5)
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    (_, body), = vast.created
+    name = body["env"]["WORKER_NAME"]
+    for i in vast.live.values():
+        i.update(cpu_cores_effective=64, cpu_ram=252 * 1024)
+    s.state["instances"][name]["slots"] = 256
+    s.slots_per_thread = 1.5
+    s.tick()
+    assert s.state["instances"][name]["replace"].startswith("resize: 256 slots, now sized 96")

@@ -127,7 +127,7 @@ class Scaler:
         # big machines: each new one pulls the image and compiles every bot it meets, once
         self.min_threads = int(g("min_threads", 64))
         self.min_reliability = float(g("min_reliability", 0.98))
-        self.slots_per_thread = float(g("slots_per_thread", 4.0))      # games are metered in CPU points, not wall time: overcommit only slows them
+        self.slots_per_thread = float(g("slots_per_thread", 1.5))      # a little over 1: covers a game's idle start-up and upload; more only lengthens games and hits the container's task limit
         self.ram_per_slot = float(g("ram_per_slot_gb", 1.5))
         self.avoid_s = float(g("avoid_hours", 2.0)) * 3600
         self.disk_gb = float(g("disk_gb", 40))
@@ -354,7 +354,8 @@ class Scaler:
                     inst["machine_id"] = v["machine_id"]
                 # sized by today's rule? (slots_per_thread, ram_per_slot can change after renting)
                 fits = self.slots_of(v)
-                if fits and inst.get("slots", 0) < 0.8 * fits and not inst.get("replace"):
+                have = inst.get("slots", 0)
+                if fits and not (0.8 * fits <= have <= 1.25 * fits) and not inst.get("replace"):
                     inst["replace"] = f"resize: {inst.get('slots')} slots, now sized {fits}"
                     self.note(f"{name}: {inst['replace']}; the engine drains it and a new machine replaces it")
                 # Outbid (interruptible) or stopped: Vast sets the intended/current state to
