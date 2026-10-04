@@ -109,7 +109,8 @@ def test_scaler_tokens_work_on_every_route_and_revoked_ones_dont(setup):
     with tokens_file(a.cfg) as t:
         t["vast-x"] = {"token": "rented-token"}
     h = {"Authorization": "Bearer rented-token"}
-    r = c.post("/api/v1/workers/lease", json=hello(worker="vast-x", want=1), headers=h)
+    from arena.worker import build_id
+    r = c.post("/api/v1/workers/lease", json=hello(worker="vast-x", want=1, build=build_id()), headers=h)
     assert r.status_code == 200 and r.json()["leases"]
     assert c.get(f"/api/v1/workers/bot/{subs[0].id}", headers=h).status_code == 200
     with tokens_file(a.cfg) as t:
@@ -132,3 +133,26 @@ def test_remote_results_keep_which_judge_played(setup, tmp_path):
     assert g.meta["judge"] == "cpp" and g.meta["judge_check"] == "same"
     bad = {**meta, "judge": "native"}
     assert c.post("/api/v1/workers/result", data={"meta": json.dumps(bad)}, headers=TOKEN).status_code == 400
+
+
+def test_rented_workers_on_older_code_drain_one_at_a_time(setup):
+    from arena.worker import build_id
+    a, d, c, _ = setup
+    (a.cfg.data_dir / "worker-image.build").write_text(build_id() + "\n")   # the pushed image
+    lease = lambda name, **k: c.post("/api/v1/workers/lease", json=hello(worker=name, want=1, **k),
+                                     headers=TOKEN).json()["leases"]
+    assert lease("vast-old1") == []                       # no build: older code, drained first
+    assert lease("vast-old2")                             # waits its turn: still leased
+    assert lease("vast-new", build=build_id())            # current code
+    lease("lab-box")                                      # not a rented machine: never drained
+    rows = {w["name"]: w for w in c.get("/api/v1/workers").json()["remote"]}
+    assert rows["vast-old1"]["draining"] and rows["vast-old2"]["outdated"] and not rows["vast-old2"]["draining"]
+    assert not rows["vast-new"]["outdated"] and not rows["lab-box"]["outdated"]
+    a.workers.workers.pop("vast-old1")                    # returned by the scaler
+    assert lease("vast-old2") == []                       # now it drains
+
+
+def test_nothing_drains_until_a_pushed_image_is_recorded(setup):
+    a, d, c, _ = setup
+    r = c.post("/api/v1/workers/lease", json=hello(worker="vast-old", want=1), headers=TOKEN).json()
+    assert r["leases"]                                    # no worker-image.build: never drained

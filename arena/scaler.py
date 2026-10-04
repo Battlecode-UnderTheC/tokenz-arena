@@ -352,7 +352,8 @@ class Scaler:
             w.get("slots", 0) for w in remote if w.get("name") not in ours)
         needed = math.ceil((left + running) * avg / self.target_s) if left + running else 0
         want = max(0, needed - own)
-        have = sum(i["slots"] for i in self.state["instances"].values() if not i.get("paused_t"))
+        have = sum(i["slots"] for i in self.state["instances"].values()
+                   if not i.get("paused_t") and not i.get("draining_t"))
         return {"left": left, "running": running, "avg_game_s": avg, "own_slots": own,
                 "needed_slots": needed, "want_rented": want, "rented_slots": have}
 
@@ -371,9 +372,8 @@ class Scaler:
                     self.retire(name, f"the engine has been unreachable for {down / 60:.0f} min")
             self.save(error=f"engine unreachable: {e}"[:300])
             return {"decision": "engine unreachable"}
-        p = self.plan(q)
         busy = {w["name"]: w for w in (q.get("remote") or [])}
-        for name, inst in self.state["instances"].items():
+        for name, inst in list(self.state["instances"].items()):
             w = busy.get(name)
             if w is not None:
                 if not inst.get("seen_t"):
@@ -381,6 +381,14 @@ class Scaler:
                 inst["seen_t"] = t
                 if w.get("running"):
                     inst["busy_t"] = t
+                # the engine drains a machine on an older worker image (one at a time): its
+                # slots stop counting, so a replacement is rented, and it goes once it's empty
+                if w.get("draining") and not inst.get("draining_t"):
+                    inst["draining_t"] = t
+                    self.note(f"draining {name}: older worker image; a new machine replaces it")
+                if inst.get("draining_t") and not w.get("running") and not self.dry_run:
+                    self.retire(name, "drained: replaced by a machine on the new worker image")
+        p = self.plan(q)
         decision = "hold"
         if self.state.get("paused"):
             decision = "paused"

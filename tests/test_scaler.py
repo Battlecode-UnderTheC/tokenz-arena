@@ -262,3 +262,21 @@ def test_machines_that_vanish_before_joining_halt_renting(make):
         clock.t += 60
     s.tick()
     assert len(vast.created) == 2 and "halted" in s.state and "before joining" in s.state["halted"]
+
+
+def test_a_draining_machine_is_replaced_then_returned_once_empty(make):
+    s, vast, clock = make(min_minutes=20, idle_minutes=10)
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    (_, body), = vast.created
+    name = body["env"]["WORKER_NAME"]
+    busy = {"name": name, "slots": 256, "running": 100, "draining": True}
+    s.queue = lambda: queue(left=3000, remote=[busy])
+    clock.t += 60
+    p = s.tick()
+    assert s.state["instances"][name]["draining_t"] and p["rented_slots"] == 0   # its slots don't count
+    assert len(vast.created) == 2                          # a replacement on the new image
+    s.queue = lambda: queue(left=3000, remote=[{**busy, "running": 0}])
+    clock.t += 60
+    s.tick()
+    assert name not in s.state["instances"] and vast.destroyed

@@ -68,3 +68,13 @@ like any worker's.
 | `secrets_dir` | `/secrets` | Holds `vast-key`, `worker-ts-authkey` and `registry-login` (`user password`). |
 
 `arena scaler --once` makes one decision and prints it.
+
+## New worker images
+
+Each deploy that pushes the worker image records the image's worker code (`build_id()`, a hash
+of `arena/worker.py`, `judge.py`, `runner.py` and `strictjudge.py`) in
+`data_dir/worker-image.build`. Rented machines (`vast-*`) report the code they run with each
+lease. The engine drains a machine on other code: no new games, it finishes its own. One machine
+at a time, oldest first. The scaler stops counting a draining machine's slots, so it rents a
+replacement, which pulls the new image, and it returns the old machine once it's empty. Without
+that file (a failed push) nothing drains. `[workers] drain_outdated = []` turns it off.

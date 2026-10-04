@@ -47,6 +47,11 @@ if [ -f "$ARENA_SECRETS/registry-push" ]; then
      && printf '%s' "$reg_pass" | docker login "${REG_IMAGE%%/*}" -u "$reg_user" --password-stdin >/dev/null 2>&1 \
      && docker push -q "$REG_IMAGE:latest" >/dev/null; then
     log "pushed $REG_IMAGE:latest"
+    # the engine drains rented machines on any other worker code, one at a time, and the
+    # scaler replaces them (arena/workers.py Registry.draining)
+    build=$(docker run --rm --network none --entrypoint python "$REG_IMAGE:latest" \
+              -c "from arena.worker import build_id; print(build_id())" 2>/dev/null || true)
+    [ -n "$build" ] && printf '%s\n' "$build" > "$ARENA_DATA/worker-image.build"
   else
     log "push to $REG_IMAGE failed (deploy is fine; rented workers keep the previous image)"
   fi

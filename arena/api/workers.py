@@ -72,7 +72,8 @@ def make_router(arena: Arena) -> APIRouter:
         # up every other request (other workers' results and leases included)
         return await run_in_threadpool(call, reg().lease, str(d["worker"])[:64], host, str(d.get("version")),
                                        int(d.get("slots", 0)), tok,
-                                       max(0, min(int(d.get("want", d.get("slots", 0))), 256)))
+                                       max(0, min(int(d.get("want", d.get("slots", 0))), 256)),
+                                       str(d["build"])[:32] if d.get("build") else None)
 
     @r.post("/heartbeat")
     async def heartbeat(request: Request):

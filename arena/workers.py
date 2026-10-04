@@ -47,6 +47,7 @@ class Worker:
     first_seen: str = field(default_factory=now)
     last_seen: float = field(default_factory=time.time)
     done: list = field(default_factory=list)     # monotonic times of recorded results
+    build: str | None = None        # its code (arena/worker.py build_id); None from older workers
 
 
 _DYN: dict = {}
@@ -129,7 +130,8 @@ class Registry:
             w = self.workers.get(worker)
             return w.token if w else None
 
-    def _touch(self, name: str, host: str, version: str, slots: int, token: str) -> Worker:
+    def _touch(self, name: str, host: str, version: str, slots: int, token: str,
+               build: str | None = None) -> Worker:
         if rules(version) != rules(ENGINE):
             raise Refused(f"this arena judges with unswbc {ENGINE}; the worker has {version}", 409)
         with self.lock:
@@ -137,13 +139,44 @@ class Registry:
             if w is None:
                 w = self.workers[name] = Worker(name, host, version, slots, token)
             w.host, w.version, w.slots, w.token, w.last_seen = host, version, max(0, slots), token, time.time()
+            if build:
+                w.build = build
             return w
 
+    def pushed_build(self) -> str | None:
+        """The worker code in the image rented machines pull now: written by deploy/update.sh
+        after a successful push (data_dir/worker-image.build). None (no file): nothing drains,
+        so a failed push never has new machines drained over and over."""
+        p = self.arena.cfg.data_dir / "worker-image.build"
+        try:
+            return p.read_text().strip() or None
+        except OSError:
+            return None
+
+    def outdated(self, w: Worker, pushed: str | None = None) -> bool:
+        """A rented machine ([workers] drain_outdated name prefixes, default vast-) running
+        other worker code than the image now pushed: it gets drained and the scaler replaces it."""
+        pushed = pushed or self.pushed_build()
+        prefixes = tuple(self.arena.cfg.get("workers", "drain_outdated", ["vast-"]))
+        return bool(pushed and prefixes) and w.name.startswith(prefixes) and w.build != pushed
+
+    def draining(self) -> str | None:
+        """The one outdated machine being drained now (no new games; it finishes its own), the
+        longest-running first: one at a time, so the remote capacity never drops all at once."""
+        pushed = self.pushed_build()
+        if not pushed:
+            return None
+        with self.lock:
+            old = sorted((w for w in self.workers.values() if self.outdated(w, pushed)),
+                         key=lambda w: w.first_seen)
+        return old[0].name if old else None
+
     # ------------------------------------------------------------------ the protocol
-    def lease(self, name: str, host: str, version: str, slots: int, token: str, want: int) -> dict:
-        self._touch(name, host, version, slots, token)
+    def lease(self, name: str, host: str, version: str, slots: int, token: str, want: int,
+              build: str | None = None) -> dict:
+        self._touch(name, host, version, slots, token, build)
         a, out = self.arena, []
-        if want > 0 and not self.daemon.paused_remote:
+        if want > 0 and not self.daemon.paused_remote and self.draining() != name:
             def lease_of(j):               # holdout games never leave this machine (take skips them)
                 lid = secrets.token_hex(8)
                 with self.lock:
@@ -245,11 +278,14 @@ class Registry:
             for l in self.leases.values():
                 running[l["worker"]] = running.get(l["worker"], 0) + 1
             out = []
+        draining, pushed = self.draining(), self.pushed_build()
+        with self.lock:
             for w in self.workers.values():
                 w.done = [x for x in w.done if x > cutoff]
                 out.append({"name": w.name, "host": w.host, "version": w.version, "slots": w.slots,
                             "running": running.get(w.name, 0), "games_last_hour": len(w.done),
-                            "token": w.token, "first_seen": w.first_seen,
+                            "token": w.token, "first_seen": w.first_seen, "build": w.build,
+                            "outdated": self.outdated(w, pushed), "draining": w.name == draining,
                             "last_seen_s": round(time.time() - w.last_seen)})
         return sorted(out, key=lambda w: w["name"])
 

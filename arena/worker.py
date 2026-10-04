@@ -30,6 +30,21 @@ from arena import judge
 from arena.state import ENGINE
 
 log = logging.getLogger("arena.worker")
+_BUILD: list = []
+
+
+def build_id() -> str:
+    """This worker's code: a hash of the files that lease, play and return games. The engine
+    computes the same from its own copy, so a rented machine on an older image is drained and
+    replaced (arena/workers.py Registry.draining, arena/scaler.py)."""
+    if not _BUILD:
+        here = Path(__file__).parent
+        h = hashlib.sha256()
+        for f in ("worker.py", "judge.py", "runner.py", "strictjudge.py"):
+            p = here / f
+            h.update(f.encode() + b"\0" + (p.read_bytes() if p.exists() else b""))
+        _BUILD.append(h.hexdigest()[:16])
+    return _BUILD[0]
 DEFAULT_ARENA = "https://tokenz-arena.lonk-kelvin.ts.net"
 
 
@@ -69,7 +84,7 @@ class Worker:
         return json.loads(self._req("POST", path, json.dumps(payload).encode(), "application/json"))
 
     def _hello(self) -> dict:
-        return {"worker": self.name, "version": ENGINE, "slots": self.slots}
+        return {"worker": self.name, "version": ENGINE, "slots": self.slots, "build": build_id()}
 
     # ------------------------------------------------------------------ cache
     def _fetch(self, path: str, dest: Path, sha: str) -> Path:
