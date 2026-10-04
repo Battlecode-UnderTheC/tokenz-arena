@@ -13,9 +13,11 @@ worker are trusted as they come.
 
 from __future__ import annotations
 
+import concurrent.futures as cf
 import contextlib
 import fcntl
 import hashlib
+import logging
 import secrets
 import threading
 import time
@@ -110,6 +112,10 @@ class Registry:
         self.leases: dict[str, dict] = {}            # lease id -> {job, worker, expires}
         self.lease_seconds = int(arena.cfg.get("workers", "lease_seconds", LEASE_SECONDS))
         self._map_sha: dict[str, tuple] = {}
+        # results are recorded here, so a worker gets its answer (and frees its slot) without
+        # waiting out the arena lock, the metrics and the replay's compression
+        self.recorder = cf.ThreadPoolExecutor(4, thread_name_prefix="record")
+        self.ack_after = float(arena.cfg.get("workers", "ack_after_s", 2.0))
 
     # ------------------------------------------------------------------ auth and identity
     def token_name(self, bearer: str | None) -> str:
@@ -195,10 +201,26 @@ class Registry:
             return {"recorded": False, "why": "unknown or expired lease"}
         if l["worker"] != name:
             return {"recorded": False, "why": "that lease belongs to another worker"}
-        ok = self.daemon.record_result(l["job"], res, name, replay)
+        fut = self.recorder.submit(self._record, l["job"], res, name, replay, w)
+        try:
+            ok = fut.result(timeout=self.ack_after)
+        except cf.TimeoutError:
+            return {"recorded": True, "queued": True}   # still being recorded: the slot is free
+        return {"recorded": ok, **({} if ok else {"why": "already recorded (a duplicate)"})}
+
+    def _record(self, job, res: dict, name: str, replay, w) -> bool:
+        try:
+            ok = self.daemon.record_result(job, res, name, replay)
+        except Exception:
+            logging.getLogger("arena").exception("recording %s from %s failed: owed again", job.key, name)
+            queue.get(self.arena).release(job, name)
+            ok = False
+        finally:
+            if replay is not None and replay.exists():
+                replay.unlink()                     # not stored (a duplicate, or a failure)
         if ok and w is not None:
             w.done.append(time.monotonic())
-        return {"recorded": ok, **({} if ok else {"why": "already recorded (a duplicate)"})}
+        return ok
 
     # ------------------------------------------------------------------ upkeep
     def reap(self):

@@ -35,8 +35,12 @@ DEFAULT_ARENA = "https://tokenz-arena.lonk-kelvin.ts.net"
 
 class Worker:
     def __init__(self, arena: str, token: str, name: str, slots: int, cache: Path,
-                 idle_exit: float = 0):
+                 idle_exit: float = 0, prefetch: int | None = None):
         self.arena, self.token, self.name, self.slots = arena.rstrip("/"), token, name, slots
+        # games leased beyond the slots: they fetch their bots and map, then wait in the
+        # process pool's queue, so a slot starts its next game the moment one ends (no lease
+        # round trip, and the result's upload overlaps the next game)
+        self.prefetch = max(2, slots // 8) if prefetch is None else max(0, prefetch)
         self.cache = cache
         self.active: dict[str, dict] = {}          # lease -> game
         self.lock = threading.Lock()
@@ -178,11 +182,12 @@ class Worker:
 
     def run(self):
         threading.Thread(target=self._heartbeats, daemon=True).start()
-        log.info("worker %s: %d slots, judge unswbc %s, arena %s", self.name, self.slots, ENGINE, self.arena)
+        log.info("worker %s: %d slots (+%d queued), judge unswbc %s, arena %s", self.name, self.slots,
+                 self.prefetch, ENGINE, self.arena)
         idle = 0
         while not self.stopping.is_set():
             with self.lock:
-                free = self.slots - len(self.active)
+                free = self.slots + self.prefetch - len(self.active)
             if free <= 0:
                 time.sleep(1)
                 continue
@@ -236,7 +241,8 @@ def main(args) -> int:
     slots = args.slots or int(env("ARENA_SLOTS") or 0) or max(1, int((os.cpu_count() or 2) / 1.5))
     idle = args.idle_exit if args.idle_exit is not None else float(env("ARENA_IDLE_EXIT") or 0)
     w = Worker(arena, token, args.name or env("WORKER_NAME") or socket.gethostname(), slots,
-               Path(args.cache or env("ARENA_CACHE") or "~/.cache/tokenz-arena-worker").expanduser(), idle)
+               Path(args.cache or env("ARENA_CACHE") or "~/.cache/tokenz-arena-worker").expanduser(), idle,
+               int(env("ARENA_PREFETCH")) if env("ARENA_PREFETCH") else None)
     w.orphan_after = float(env("ARENA_ORPHAN_MINUTES") or 0) * 60
     signal.signal(signal.SIGTERM, lambda *_: w.stopping.set())
     signal.signal(signal.SIGINT, lambda *_: w.stopping.set())

@@ -83,7 +83,8 @@ class Daemon:
 
     def busy(self) -> int:
         """Slots of the engine's own pool in use (games leased to remote workers don't count)."""
-        return sum(1 for r in self.arena.running.values() if r.get("worker", "local") == "local")
+        # a copy: result threads add and remove running games while this counts
+        return sum(1 for r in list(self.arena.running.values()) if r.get("worker", "local") == "local")
 
     def _tick(self):
         a = self.arena

@@ -83,6 +83,7 @@ token that has `read:packages` (`docker login ghcr.io`).
 | `ARENA_URL` | Default `https://tokenz-arena.lonk-kelvin.ts.net`. |
 | `WORKER_NAME` | Default: the Batch job id, else the host name. |
 | `ARENA_SLOTS` | Games at once. Default: cores ÷ 1.5. |
+| `ARENA_PREFETCH` | Games leased beyond the slots, waiting their turn with bots and map fetched, so a slot starts its next game as soon as one ends. Default: slots ÷ 8 (at least 2). The website's running count includes them. |
 | `ARENA_IDLE_EXIT` | Exit after this many idle seconds. Use it for batch jobs, so they end when the queue is empty. |
 
 **Any machine with Docker:**

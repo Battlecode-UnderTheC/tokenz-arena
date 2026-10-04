@@ -68,15 +68,19 @@ def make_router(arena: Arena) -> APIRouter:
         tok = token_name(arena, request)
         d = await body(request)
         host = caller(request).owner
-        return call(reg().lease, str(d["worker"])[:64], host, str(d.get("version")),
-                    int(d.get("slots", 0)), tok, max(0, min(int(d.get("want", d.get("slots", 0))), 256)))
+        # in a thread: picking games waits for the arena lock, and on the event loop that held
+        # up every other request (other workers' results and leases included)
+        return await run_in_threadpool(call, reg().lease, str(d["worker"])[:64], host, str(d.get("version")),
+                                       int(d.get("slots", 0)), tok,
+                                       max(0, min(int(d.get("want", d.get("slots", 0))), 256)))
 
     @r.post("/heartbeat")
     async def heartbeat(request: Request):
         tok = token_name(arena, request)
         d = await body(request)
-        return call(reg().heartbeat, str(d["worker"])[:64], caller(request).owner, str(d.get("version")),
-                    int(d.get("slots", 0)), tok, [str(x) for x in d.get("leases") or []])
+        return await run_in_threadpool(call, reg().heartbeat, str(d["worker"])[:64], caller(request).owner,
+                                       str(d.get("version")), int(d.get("slots", 0)), tok,
+                                       [str(x) for x in d.get("leases") or []])
 
     @r.post("/result")
     async def result(request: Request, meta: str = Form(...), replay: UploadFile | None = File(None)):
@@ -103,11 +107,11 @@ def make_router(arena: Arena) -> APIRouter:
             raise HTTPException(400, "judge must be official or cpp, judge_check same or different")
         if res["judge"] is None:
             res.pop("judge")                       # an older worker: the official judge
-        # recorded in a worker thread: storing and compressing the replay takes a moment, and on
-        # the server's own thread it held up every other request
+        # recorded off the event loop (arena/workers.py Registry.recorder), which also removes
+        # the uploaded replay when it isn't stored
         out = await run_in_threadpool(call, reg().result, str(m["worker"])[:64], tok, str(m["lease"]), res, path)
-        if path is not None and path.exists():
-            path.unlink()                                   # not recorded (a duplicate)
+        if path is not None and path.exists() and not out.get("queued") and not out.get("recorded"):
+            path.unlink()                                   # refused before recording
         return out
 
     @r.get("/bot/{sid}")
