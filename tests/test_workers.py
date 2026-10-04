@@ -181,3 +181,15 @@ def test_a_returned_machines_games_are_owed_again_at_once(setup):
     assert not a.workers.leases and "vast-r" not in a.workers.workers
     again = c.post("/api/v1/workers/lease", json=hello(want=2), headers=TOKEN).json()["leases"]
     assert len(again) == len(got)
+
+
+def test_a_machine_failure_is_played_again_and_final_after_three(setup):
+    a, d, c, _ = setup
+    err = {"error": "worker vast-z: RuntimeError: cannot schedule new futures after shutdown"}
+    for attempt in range(3):
+        l = c.post("/api/v1/workers/lease", json=hello(want=1), headers=TOKEN).json()["leases"][0]
+        meta = {"lease": l["lease"], "worker": "w1", **err}
+        out = c.post("/api/v1/workers/result", data={"meta": json.dumps(meta)}, headers=TOKEN).json()
+        assert out["recorded"] == (attempt == 2)
+    g = a.games[-1]
+    assert g.error and g.meta["final_error"]

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable
 
 from arena import judge, judge_checks, queue, rating, scheduler, store, submit
-from arena.state import CHECKING, ENGINE, Arena, Game, now
+from arena.state import CHECKING, ENGINE, INFRA_TRIES, Arena, Game, infra_error, now
 
 log = logging.getLogger("arena")
 RATE_SECONDS = 15
@@ -51,6 +51,7 @@ class Daemon:
         # game, and doing it per result (about one a second with a rented machine) kept the
         # engine's process busy enough that its API took 10-20 s.
         self._rate_due = False
+        self._infra_tries: dict = {}      # game key -> machine failures so far (arena/state.py infra_error)
         self.every(RATE_SECONDS, self._rate_if_due, "ratings")
         from arena import duels
         self.every(300, lambda: duels.get(arena).expire(), "duels-expire")
@@ -180,8 +181,18 @@ class Daemon:
                      worker, res.get("error") or res.get("winner") or "draw")
             self.wake.set()
             return ok
+        if not job.duel and infra_error(res.get("error")):
+            n = self._infra_tries[job.key] = self._infra_tries.get(job.key, 0) + 1
+            if n < INFRA_TRIES:                # the machine failed, not the bots: play it again
+                log.info("game %s vs %s on %s failed on %s (%s): owed again (try %d of %d)", job.a, job.b,
+                         Path(job.map).stem, worker, str(res["error"])[:120], n, INFRA_TRIES)
+                queue.get(self.arena).release(job, worker)
+                self.wake.set()
+                return False
         g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
                  a=job.a, b=job.b, meta={"engine": ENGINE, "worker": worker})
+        if infra_error(res.get("error")):
+            g.meta["final_error"] = True       # failed INFRA_TRIES times: recorded as it is
         try:
             from arena.maps import file_sha
             g.meta["map_sha"] = file_sha(Path(job.map))       # the map content it was played on

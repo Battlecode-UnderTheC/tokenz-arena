@@ -302,3 +302,12 @@ def test_never_rents_a_second_instance_on_a_machine_it_holds(make):
                                       "created_t": clock.t, "busy_t": clock.t}
     vast.offers = lambda q: [{**o, "machine_id": 7 if o["id"] == 1 else 100 + o["id"]} for o in OFFERS]
     assert 1 not in {o["id"] for o in s.ranked_offers()}
+
+
+def test_a_machine_it_rented_never_counts_as_owned(make):
+    from arena.workers import tokens_file
+    s, vast, clock = make()
+    with tokens_file(s.cfg) as t:
+        t["vast-gone"] = {"token": "x", "revoked": True}       # rented, then died
+    p = s.plan(queue(left=3000, remote=[{"name": "vast-gone", "slots": 768, "running": 0}]))
+    assert p["own_slots"] == 20

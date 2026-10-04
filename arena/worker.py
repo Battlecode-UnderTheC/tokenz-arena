@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 import uuid
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 from arena import judge
@@ -61,13 +62,26 @@ class Worker:
         self.lock = threading.Lock()
         self.stopping = threading.Event()
         self.heartbeat_seconds = 30
-        self.procs = ProcessPoolExecutor(max(1, slots), mp_context=mp.get_context("spawn"))
+        self.procs = self._new_pool()
+        self.pool_lock = threading.Lock()
         self.fetch_lock = threading.Lock()
         self.wasm_locks: dict = collections.defaultdict(threading.Lock)
         self.idle_exit = idle_exit                 # exit after this long with nothing to do (0: never)
         self.last_work = time.monotonic()
         self.last_contact = time.monotonic()       # the arena last answered
         self.orphan_after = 0.0                    # exit after this long without the arena (0: never)
+
+    def _new_pool(self) -> ProcessPoolExecutor:
+        return ProcessPoolExecutor(max(1, self.slots), mp_context=mp.get_context("spawn"))
+
+    def _rebuild_pool(self, broken: ProcessPoolExecutor):
+        """One game process died abruptly (killed for memory, say): the pool refuses every game
+        after it, so a new one replaces it, once, by whichever game noticed first."""
+        with self.pool_lock:
+            if self.procs is broken:
+                log.error("the process pool broke: starting a new one")
+                self.procs = self._new_pool()
+                broken.shutdown(wait=False, cancel_futures=True)
 
     # ------------------------------------------------------------------ http
     def _req(self, method: str, path: str, body: bytes | None = None, ctype: str | None = None,
@@ -155,9 +169,15 @@ class Worker:
             m = self.map(game["suite"], game["map"])
             work = self.cache / "work"
             work.mkdir(parents=True, exist_ok=True)
-            res = self.procs.submit(judge.run_game, str(m), str(a), str(b), int(game["seed"]),
-                                    str(work / "replays"), str(work), float(game.get("timeout", 1800)),
-                                    game.get("judge", "official"), bool(game.get("check"))).result()
+            pool = self.procs
+            try:
+                res = pool.submit(judge.run_game, str(m), str(a), str(b), int(game["seed"]),
+                                  str(work / "replays"), str(work), float(game.get("timeout", 1800)),
+                                  game.get("judge", "official"), bool(game.get("check"))).result()
+            except (BrokenProcessPool, RuntimeError) as e:
+                if isinstance(e, BrokenProcessPool) or "after shutdown" in str(e):
+                    self._rebuild_pool(pool)
+                raise                       # reported as the worker's failure: the engine replays it
             replay = Path(res.pop("replay")) if res.get("replay") else None
         except Exception as e:
             log.exception("lease %s failed", lease)
@@ -259,6 +279,14 @@ def main(args) -> int:
                Path(args.cache or env("ARENA_CACHE") or "~/.cache/tokenz-arena-worker").expanduser(), idle,
                int(env("ARENA_PREFETCH")) if env("ARENA_PREFETCH") else None)
     w.orphan_after = float(env("ARENA_ORPHAN_MINUTES") or 0) * 60
+    try:                                   # a game process holds a few files: hundreds of slots need more
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        want = hard if hard != resource.RLIM_INFINITY else 1 << 20
+        if soft < want:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+    except (ImportError, ValueError, OSError) as e:
+        log.warning("couldn't raise the open-file limit: %s", e)
     signal.signal(signal.SIGTERM, lambda *_: w.stopping.set())
     signal.signal(signal.SIGINT, lambda *_: w.stopping.set())
     try:

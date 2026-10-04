@@ -359,7 +359,11 @@ class Scaler:
         left = int((q.get("totals") or {}).get("left") or 0)
         running = len(q.get("running") or [])
         avg = float(q.get("avg_game_s") or 30)
-        ours = set(self.state["instances"])
+        # ours: every machine the scaler ever rented (its token file), not only those it lists
+        # now; one that just died stays on the engine's list until its heartbeats time out, and
+        # counted as somebody else's it once made the scaler hold with nothing rented
+        from arena.workers import dynamic_tokens
+        ours = set(self.state["instances"]) | set(dynamic_tokens(self.cfg))
         remote = q.get("remote") or []
         own = int((q.get("slots") or {}).get("local") or 0) + sum(
             w.get("slots", 0) for w in remote if w.get("name") not in ours)

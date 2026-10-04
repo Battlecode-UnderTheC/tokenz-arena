@@ -319,7 +319,20 @@ def current_map(g: Game) -> bool:
     return sha is None or mine is None or mine == sha      # None: not stamped yet (migrate.py)
 
 
+INFRA_TRIES = 3
+
+
+def infra_error(error: str | None) -> bool:
+    """A game that failed because of the machine, not the bots: the worker's own exception
+    ("worker <name>: ...", a broken process pool, say) or a judge that died without a verdict."""
+    return bool(error) and (error.startswith("worker ") or "no verdict in judge output" in error)
+
+
 def current_game(g: Game) -> bool:
+    # a machine's failure isn't a result: the game is owed again, unless the engine recorded it
+    # as final after INFRA_TRIES attempts (meta.final_error)
+    if infra_error(g.error) and not (g.meta or {}).get("final_error"):
+        return False
     return current_engine(g) and current_map(g)
 
 
