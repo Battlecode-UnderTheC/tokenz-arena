@@ -294,3 +294,11 @@ def test_machines_sized_under_todays_rule_are_marked_for_replacement(make):
     s.slots_per_thread = 4.0
     s.tick()
     assert s.state["instances"][name]["replace"].startswith("resize: 64 slots, now sized 256")
+
+
+def test_never_rents_a_second_instance_on_a_machine_it_holds(make):
+    s, vast, clock = make()
+    s.state["instances"]["vast-x"] = {"name": "vast-x", "slots": 10, "dph": 0.1, "machine_id": 7,
+                                      "created_t": clock.t, "busy_t": clock.t}
+    vast.offers = lambda q: [{**o, "machine_id": 7 if o["id"] == 1 else 100 + o["id"]} for o in OFFERS]
+    assert 1 not in {o["id"] for o in s.ranked_offers()}

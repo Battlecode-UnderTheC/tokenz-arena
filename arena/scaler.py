@@ -227,8 +227,13 @@ class Scaler:
 
     def ranked_offers(self) -> list[dict]:
         out = []
+        # never a second instance on a machine we hold: on an interruptible machine the higher
+        # bid pauses the other, so we outbid ourselves, again and again, at a rising price
+        ours = {i.get("machine_id") for i in self.state["instances"].values()} - {None}
         for o in self.vast.offers(self.query()):
             if float(o.get("cpu_cores_effective") or 0) < self.min_threads:
+                continue
+            if o.get("machine_id") in ours:
                 continue
             slots = self.slots_of(o)
             if slots < 4 or not o.get("dph_total"):
@@ -273,6 +278,7 @@ class Scaler:
         inst = {"id": iid, "name": name, "offer": offer.get("id"), "dph": offer["_price"],
                 "interruptible": self.interruptible,
                 "slots": slots, "threads": offer.get("cpu_cores_effective"), "cpu": offer.get("cpu_name"),
+                "machine_id": offer.get("machine_id"),
                 "where": offer.get("geolocation"), "created": iso(self.clock()), "created_t": self.clock(),
                 "busy_t": self.clock()}
         self.state["instances"][name] = inst
@@ -331,6 +337,8 @@ class Scaler:
                 v = live[name]
                 status = v.get("actual_status")
                 inst["status"] = status
+                if v.get("machine_id") is not None:
+                    inst["machine_id"] = v["machine_id"]
                 # sized by today's rule? (slots_per_thread, ram_per_slot can change after renting)
                 fits = self.slots_of(v)
                 if fits and inst.get("slots", 0) < 0.8 * fits and not inst.get("replace"):
