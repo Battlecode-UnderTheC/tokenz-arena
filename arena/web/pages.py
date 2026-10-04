@@ -25,7 +25,7 @@ from arena.state import Arena, result_for
 from arena.web import viewer
 
 NAV = [("/", "Leaderboard"), ("/lineage", "Lineage"), ("/ideas", "Ideas"), ("/games", "Games"), ("/maps", "Maps"),
-       ("/queue", "Queue"), ("/server", "Server"), ("/compare", "Compare"), ("/evals", "Evals"), ("/submit", "Submit"), ("/docs", "Docs")]
+       ("/queue", "Queue"), ("/duels", "Duels"), ("/server", "Server"), ("/compare", "Compare"), ("/evals", "Evals"), ("/submit", "Submit"), ("/docs", "Docs")]
 
 
 def e(x) -> str:

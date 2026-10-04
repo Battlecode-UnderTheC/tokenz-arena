@@ -157,3 +157,13 @@ def test_duels_survive_a_restart(setup):
     finish(c, leases[0]["lease"])
     b2 = duels.Book(a)
     assert b2.left(did) == 3 and len(b2.pending[did]) == 3
+
+
+def test_duels_pages(setup):
+    a, d, c, (p, q) = setup
+    did = c.post("/api/v1/duels", json={"a": p.id, "b": q.id, "suites": ["official"], "seeds": "random:1"}).json()["id"]
+    r = c.get("/duels")
+    assert r.status_code == 200 and "Duels" in r.text and 'href="/duels"' in r.text
+    r = c.get(f"/duels/{did}")
+    assert r.status_code == 200 and f'"{did}"' in r.text
+    assert c.get("/duels/duel-x<script>").status_code == 404
