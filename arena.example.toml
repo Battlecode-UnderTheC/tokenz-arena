@@ -16,6 +16,10 @@ judge = "official"          # "cpp": play wasm bots with cppjudge (judge/), the 
 official = "<repo>/maps/official"   # <repo> = this checkout
 rotating = "maps/rotating"
 holdout = "maps/holdout"            # data_dir only; never committed, never served
+# mapgen maps (arena/mapgen.py) added to the generated suites; 0 = none (the default)
+# rotating_mapgen = 10                 # 11 structural families, a new set each week
+# holdout_mapgen = 20
+# holdout_trick = 8                    # maps that break contest-map habits
 
 [seeds]
 official = [1592614637, 1, 2]

@@ -6,11 +6,19 @@
 | tournament | competition tournament maps (rebuilt from replays)     | <repo>/maps/tournament        |
 | server     | the maps the competition server plays now (bridge)     | data_dir/maps/server          |
 | rotating   | 20 worldgen maps, a new set every week (epoch)         | data_dir/maps/rotating/e<N>   |
+|            | + [maps] rotating_mapgen / rotating_trick mapgen maps  |                               |
 | holdout    | 60 worldgen maps from a secret seed range, never shown | data_dir/maps/holdout         |
+|            | + [maps] holdout_mapgen / holdout_trick mapgen maps    |                               |
 
 worldgen.py (a procedural map generator by xCirno1) is published as a gist with no license,
 so it's not copied into this repo: it's downloaded from the gist at a pinned revision and
-checked against its sha256.
+checked against its sha256. mapgen.py (ours, from syeyoung-tokens tools/mapgen) is in this
+package: 11 structural families picked by the seed (open, rich-near-home, maze, rooms,
+sealed-spawn, ring, off-axis, sparse, crowded, anti-centre, mixed), and `trick` maps that break
+habits learnt on the contest maps (food on the wrap seam, halves joined only by portals, a
+honeypot maze, food only between the queens, giant and tiny boards). Each generator's maps
+have their own file prefix, so adding mapgen maps to a suite keeps its worldgen maps (and
+their games) as they are.
 """
 
 from __future__ import annotations
@@ -138,20 +146,55 @@ def worldgen(cfg: Config) -> Path:
     return p
 
 
-def _generate(cfg: Config, seeds: list[int], out: Path, prefix: str):
-    gen = worldgen(cfg)
-    tmp = out.with_name(out.name + ".tmp")
+MAPGEN = Path(__file__).with_name("mapgen.py")
+
+
+def _generate(cfg: Config, seeds: list[int], out: Path, prefix: str, gen: str = "worldgen"):
+    """<prefix><seed>.map for each seed, written beside the folder and moved in when all are
+    done; the folder's other maps (another generator's) stay."""
+    script, extra = (worldgen(cfg), []) if gen == "worldgen" else (MAPGEN, [] if gen == "mapgen" else ["--family", gen.split(":", 1)[1]])
+    tmp = out.with_name(out.name + f".{prefix}.tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
 
     def one(seed: int):
-        subprocess.run([sys.executable, str(gen), "--seed", str(seed), "-o",
+        subprocess.run([sys.executable, str(script), *extra, "--seed", str(seed), "-o",
                         str(tmp / f"{prefix}{seed}.map")], check=True, capture_output=True, timeout=300)
 
     with cf.ThreadPoolExecutor(4) as ex:
         list(ex.map(one, seeds))
-    shutil.rmtree(out, ignore_errors=True)
-    tmp.rename(out)
+    out.mkdir(parents=True, exist_ok=True)
+    for p in out.glob(f"{prefix}*.map"):
+        p.unlink()
+    for p in tmp.glob("*.map"):
+        p.rename(out / p.name)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+# (prefix, generator, [maps] count key, default count, seed offset): each part of a generated
+# suite. A count of 0 leaves the part out (and removes its maps).
+PARTS = {
+    "rotating": [("wg", "worldgen", "rotating_count", ROTATING_MAPS, 0),
+                 ("mg", "mapgen", "rotating_mapgen", 0, 500),
+                 ("mt", "mapgen:trick", "rotating_trick", 0, 800)],
+    "holdout": [("h", "worldgen", "holdout_count", HOLDOUT_MAPS, 0),
+                ("hm", "mapgen", "holdout_mapgen", 0, 1_000_000),
+                ("ht", "mapgen:trick", "holdout_trick", 0, 2_000_000)],
+}
+
+
+def _ensure_parts(cfg: Config, suite: str, d: Path, base: int, label: str):
+    for prefix, gen, key, default, offset in PARTS[suite]:
+        n = cfg.get("maps", key, default)
+        have = sorted(d.glob(f"{prefix}[0-9]*.map")) if d.is_dir() else []
+        if n <= 0:
+            for p in have:
+                p.unlink()
+            continue
+        if len(have) >= n:
+            continue
+        log.info("maps: generating %s %s (%d %s maps)", suite, label, n, gen)
+        _generate(cfg, [base + offset + i for i in range(n)], d, prefix, gen)
 
 
 def rotating_dir(cfg: Config, e: int | None = None) -> Path:
@@ -163,10 +206,7 @@ def ensure_rotating(cfg: Config) -> Path:
     """This epoch's rotating suite, generated if missing (seeds e*1000 .. e*1000+19)."""
     e = epoch()
     d = rotating_dir(cfg, e)
-    n = cfg.get("maps", "rotating_count", ROTATING_MAPS)
-    if not d.is_dir() or len(list(d.glob("*.map"))) < n:
-        log.info("maps: generating rotating suite e%d (%d worldgen maps)", e, n)
-        _generate(cfg, [e * 1000 + i for i in range(n)], d, "wg")
+    _ensure_parts(cfg, "rotating", d, e * 1000, f"e{e}")
     return d
 
 
@@ -174,16 +214,12 @@ def ensure_holdout(cfg: Config) -> Path:
     """The hidden holdout: worldgen maps from a secret seed range chosen once per arena.
     Never served: no API, page or MCP tool lists these maps or their games."""
     d = cfg.map_dir("holdout")
-    n = cfg.get("maps", "holdout_count", HOLDOUT_MAPS)
-    if d.is_dir() and len(list(d.glob("*.map"))) >= n:
-        return d
     salt_file = d.with_name("holdout.salt")
     if not salt_file.exists():
         salt_file.parent.mkdir(parents=True, exist_ok=True)
         salt_file.write_text(str(10_000_000 + secrets.randbelow(900_000_000)))
     salt = int(salt_file.read_text())
-    log.info("maps: generating the holdout suite (%d worldgen maps)", n)
-    _generate(cfg, [salt + i for i in range(n)], d, "h")
+    _ensure_parts(cfg, "holdout", d, salt, "suite")
     return d
 
 
