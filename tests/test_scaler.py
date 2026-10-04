@@ -168,6 +168,22 @@ def test_interruptible_bids_and_replaces_paused_machines(make):
     assert name not in s.state["instances"] and iid in vast.destroyed
 
 
+def test_outbid_while_loading_is_returned_at_once_and_is_no_boot_failure(make):
+    """Vast keeps actual_status "loading" for a machine outbid before it booted; its intended and
+    current state say "stopped". It's outbid, not a boot failure, and goes on the next tick."""
+    s, vast, clock = make(interruptible=True, paused_minutes=0)
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    (offer, body), = vast.created
+    name = body["env"]["WORKER_NAME"]
+    iid = s.state["instances"][name]["id"]
+    vast.live[iid].update(actual_status="loading", intended_status="stopped", cur_state="stopped")
+    clock.t += 60
+    s.tick()
+    assert name not in s.state["instances"] and iid in vast.destroyed
+    assert s.state["boot_failures"] == 0
+
+
 def test_engine_down_returns_everything(make):
     s, vast, clock = make(engine_down_minutes=10)
     s.queue = lambda: queue(left=3000)

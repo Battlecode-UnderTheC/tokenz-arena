@@ -328,10 +328,15 @@ class Scaler:
                         self.note(self.state["halted"])
             else:
                 inst = self.state["instances"][name]
-                status = live[name].get("actual_status")
+                v = live[name]
+                status = v.get("actual_status")
                 inst["status"] = status
-                if inst.get("seen_t") and status not in ("running", "loading", None):
-                    inst.setdefault("paused_t", self.clock())      # outbid (interruptible) or stopped
+                # Outbid (interruptible) or stopped: Vast sets the intended/current state to
+                # "stopped" at once, while actual_status can still say "loading" for a machine
+                # outbid before it booted, so those are read first.
+                stopped = "stopped" in (v.get("intended_status"), v.get("cur_state"))
+                if stopped or (inst.get("seen_t") and status not in ("running", "loading", None)):
+                    inst.setdefault("paused_t", self.clock())
                 else:
                     inst.pop("paused_t", None)
 
@@ -386,15 +391,16 @@ class Scaler:
         else:
             # boot failures: never showed up as a worker; paused too long: outbid
             for name, inst in list(self.state["instances"].items()):
-                if not inst.get("seen_t") and t - inst["created_t"] > self.boot_s:
+                if inst.get("paused_t") and t - inst["paused_t"] >= self.paused_s:
+                    # outbid (before or after joining): not a boot failure
+                    self.retire(name, f"outbid (paused {(t - inst['paused_t']) / 60:.0f} min)")
+                elif not inst.get("seen_t") and t - inst["created_t"] > self.boot_s:
                     self.retire(name, f"never joined within {self.boot_s / 60:.0f} min")
                     self.state["boot_failures"] += 1
                     if self.state["boot_failures"] >= self.max_boot_failures:
                         self.state["halted"] = (f"{self.state['boot_failures']} machines in a row never joined; "
                                                 "renting stopped until `arena scaler --resume`")
                         self.note(self.state["halted"])
-                elif inst.get("paused_t") and t - inst["paused_t"] > self.paused_s:
-                    self.retire(name, f"paused (outbid) for {self.paused_s / 60:.0f} min")
             if p["want_rented"] > p["rented_slots"] and p["left"] <= self.start_backlog:
                 decision = f"backlog {p['left']} games (renting starts above {self.start_backlog})"
             elif p["want_rented"] > p["rented_slots"]:
