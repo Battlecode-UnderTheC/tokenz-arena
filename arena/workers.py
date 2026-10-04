@@ -280,9 +280,14 @@ class Registry:
     def reap(self):
         """Drops expired leases (their games are owed again) and workers silent for a while."""
         t = time.time()
+        # a machine the scaler returned (outbid, drained, idle) has its token revoked: its games
+        # go back now, not when their leases run out
+        revoked = {n for n, d in dynamic_tokens(self.arena.cfg).items() if isinstance(d, dict) and d.get("revoked")}
         with self.lock:
-            dead = [lid for lid, l in self.leases.items() if l["expires"] < t]
-            gone = [n for n, w in self.workers.items() if t - w.last_seen > 3 * HEARTBEAT_SECONDS + 30]
+            returned = {n for n, w in self.workers.items() if w.token in revoked}
+            dead = [lid for lid, l in self.leases.items() if l["expires"] < t or l["worker"] in returned]
+            gone = [n for n, w in self.workers.items()
+                    if t - w.last_seen > 3 * HEARTBEAT_SECONDS + 30 or n in returned]
             expired = [self.leases.pop(lid) for lid in dead]
             for n in gone:
                 self.workers.pop(n, None)

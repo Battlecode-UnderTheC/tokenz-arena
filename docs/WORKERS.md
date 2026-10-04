@@ -53,6 +53,8 @@ Non-goals:
   `lease_seconds` (default 120). Heartbeats every 30 s renew it. If it expires (the worker died,
   or lost its network), the engine drops it and the game is owed again; the next lease hands it
   out. A result for an expired lease is dropped, so a game is never counted twice.
+  A rented machine the scaler returns (outbid, drained, idle) has its token revoked, and its
+  games are owed again within 10 s instead of waiting for their leases to run out.
 - **Same judge, same results.** A worker sends its unswbc version with every call. A version that
   isn't the engine's is refused (409), because results from another judge version mustn't mix
   with ratings (the same rule as engine pinning). Games are deterministic given the seed and the

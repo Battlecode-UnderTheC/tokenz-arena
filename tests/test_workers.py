@@ -165,3 +165,19 @@ def test_a_machine_the_scaler_marks_is_drained(setup):
     store.write_json(a.cfg.data_dir / "scaler" / "state.json", {"instances": {"vast-small": {"replace": "resize"}}})
     r = c.post("/api/v1/workers/lease", json=hello(worker="vast-small", want=1, build=build_id()), headers=TOKEN)
     assert r.json()["leases"] == []
+
+
+def test_a_returned_machines_games_are_owed_again_at_once(setup):
+    from arena.workers import tokens_file
+    a, d, c, _ = setup
+    with tokens_file(a.cfg) as t:
+        t["vast-r"] = {"token": "rt"}
+    h = {"Authorization": "Bearer rt"}
+    got = c.post("/api/v1/workers/lease", json=hello(worker="vast-r", want=2), headers=h).json()["leases"]
+    assert got and len(a.workers.leases) == len(got)
+    with tokens_file(a.cfg) as t:
+        t["vast-r"]["revoked"] = True                     # the scaler returned it
+    a.workers.reap()
+    assert not a.workers.leases and "vast-r" not in a.workers.workers
+    again = c.post("/api/v1/workers/lease", json=hello(want=2), headers=TOKEN).json()["leases"]
+    assert len(again) == len(got)
