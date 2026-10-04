@@ -182,17 +182,20 @@ class Daemon:
             self.wake.set()
             return ok
         if not job.duel and infra_error(res.get("error")):
-            n = self._infra_tries[job.key] = self._infra_tries.get(job.key, 0) + 1
+            seen = self._infra_tries.setdefault(job.key, set())
+            seen.add(worker)
+            n = len(seen)
             if n < INFRA_TRIES:                # the machine failed, not the bots: play it again
-                log.info("game %s vs %s on %s failed on %s (%s): owed again (try %d of %d)", job.a, job.b,
+                log.info("game %s vs %s on %s failed on %s (%s): owed again (%d of %d machines)", job.a, job.b,
                          Path(job.map).stem, worker, str(res["error"])[:120], n, INFRA_TRIES)
                 queue.get(self.arena).release(job, worker)
                 self.wake.set()
                 return False
         g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
                  a=job.a, b=job.b, meta={"engine": ENGINE, "worker": worker})
-        if infra_error(res.get("error")):
-            g.meta["final_error"] = True       # failed INFRA_TRIES times: recorded as it is
+        if infra_error(res.get("error")):      # failed on INFRA_TRIES machines: recorded as it is
+            g.meta["final_error"] = True
+            g.meta["final_workers"] = sorted(self._infra_tries.get(job.key, ()))
         try:
             from arena.maps import file_sha
             g.meta["map_sha"] = file_sha(Path(job.map))       # the map content it was played on

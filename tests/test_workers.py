@@ -186,13 +186,19 @@ def test_a_returned_machines_games_are_owed_again_at_once(setup):
 def test_a_machine_failure_is_played_again_and_final_after_three(setup):
     a, d, c, _ = setup
     err = {"error": "worker vast-z: RuntimeError: cannot schedule new futures after shutdown"}
-    for attempt in range(3):
-        l = c.post("/api/v1/workers/lease", json=hello(want=1), headers=TOKEN).json()["leases"][0]
-        meta = {"lease": l["lease"], "worker": "w1", **err}
-        out = c.post("/api/v1/workers/result", data={"meta": json.dumps(meta)}, headers=TOKEN).json()
-        assert out["recorded"] == (attempt == 2)
+
+    def fail_on(worker):
+        l = c.post("/api/v1/workers/lease", json=hello(worker=worker, want=1), headers=TOKEN).json()["leases"][0]
+        meta = {"lease": l["lease"], "worker": worker, **err}
+        return c.post("/api/v1/workers/result", data={"meta": json.dumps(meta)}, headers=TOKEN).json()["recorded"]
+    assert not fail_on("w1") and not fail_on("w1") and not fail_on("w1")   # one machine, any number of times
+    assert not fail_on("w2")
+    assert fail_on("w3")                                                    # the third machine: final
     g = a.games[-1]
-    assert g.error and g.meta["final_error"]
+    from arena.state import current_game
+    assert g.error and g.meta["final_workers"] == ["w1", "w2", "w3"] and current_game(g)
+    g.meta.pop("final_workers")                                             # the old rule's "final": replayed
+    assert not current_game(g)
 
 
 def test_leases_survive_an_engine_restart(setup):

@@ -329,9 +329,10 @@ def infra_error(error: str | None) -> bool:
 
 
 def current_game(g: Game) -> bool:
-    # a machine's failure isn't a result: the game is owed again, unless the engine recorded it
-    # as final after INFRA_TRIES attempts (meta.final_error)
-    if infra_error(g.error) and not (g.meta or {}).get("final_error"):
+    # a machine's failure isn't a result: the game is owed again, unless it failed on
+    # INFRA_TRIES different machines (meta.final_workers); one crashing machine can fail the same
+    # game three times in seconds, and those were once kept as final
+    if infra_error(g.error) and len(set((g.meta or {}).get("final_workers") or ())) < INFRA_TRIES:
         return False
     return current_engine(g) and current_map(g)
 
