@@ -242,12 +242,12 @@ def test_prefers_big_machines(make):
     assert offer == 1                                  # the 256-thread box, not a stack of small ones
 
 
-def test_rents_only_above_500_games(make):
+def test_rents_only_above_200_games(make):
     s, vast, clock = make(target_minutes=1)            # tiny target: any backlog "needs" more slots
-    s.queue = lambda: queue(left=500)
+    s.queue = lambda: queue(left=200)
     p = s.tick()
-    assert not vast.created and "renting starts above 500" in p["decision"]
-    s.queue = lambda: queue(left=501)
+    assert not vast.created and "renting starts above 200" in p["decision"]
+    s.queue = lambda: queue(left=201)
     clock.t += 60
     s.tick()
     assert vast.created
