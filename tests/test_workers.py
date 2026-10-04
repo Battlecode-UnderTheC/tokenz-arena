@@ -156,3 +156,12 @@ def test_nothing_drains_until_a_pushed_image_is_recorded(setup):
     a, d, c, _ = setup
     r = c.post("/api/v1/workers/lease", json=hello(worker="vast-old", want=1), headers=TOKEN).json()
     assert r["leases"]                                    # no worker-image.build: never drained
+
+
+def test_a_machine_the_scaler_marks_is_drained(setup):
+    from arena import store
+    from arena.worker import build_id
+    a, d, c, _ = setup
+    store.write_json(a.cfg.data_dir / "scaler" / "state.json", {"instances": {"vast-small": {"replace": "resize"}}})
+    r = c.post("/api/v1/workers/lease", json=hello(worker="vast-small", want=1, build=build_id()), headers=TOKEN)
+    assert r.json()["leases"] == []

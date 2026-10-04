@@ -154,19 +154,35 @@ class Registry:
         except OSError:
             return None
 
+    def to_replace(self) -> set:
+        """Rented machines the scaler wants replaced (data_dir/scaler/state.json, instances
+        marked `replace`: sized under today's slots_per_thread, say)."""
+        p = self.arena.cfg.data_dir / "scaler" / "state.json"
+        try:
+            m = p.stat().st_mtime_ns
+        except OSError:
+            return set()
+        if getattr(self, "_replace", (None,))[0] != m:
+            d = store.read_json(p, {}) or {}
+            self._replace = (m, {n for n, i in (d.get("instances") or {}).items() if i.get("replace")})
+        return self._replace[1]
+
     def outdated(self, w: Worker, pushed: str | None = None) -> bool:
         """A rented machine ([workers] drain_outdated name prefixes, default vast-) running
-        other worker code than the image now pushed: it gets drained and the scaler replaces it."""
-        pushed = pushed or self.pushed_build()
+        other worker code than the image now pushed, or one the scaler wants replaced: it gets
+        drained and the scaler replaces it."""
         prefixes = tuple(self.arena.cfg.get("workers", "drain_outdated", ["vast-"]))
-        return bool(pushed and prefixes) and w.name.startswith(prefixes) and w.build != pushed
+        if not prefixes or not w.name.startswith(prefixes):
+            return False
+        if w.name in self.to_replace():
+            return True
+        pushed = pushed or self.pushed_build()
+        return bool(pushed) and w.build != pushed
 
     def draining(self) -> str | None:
         """The one outdated machine being drained now (no new games; it finishes its own), the
         longest-running first: one at a time, so the remote capacity never drops all at once."""
         pushed = self.pushed_build()
-        if not pushed:
-            return None
         with self.lock:
             old = sorted((w for w in self.workers.values() if self.outdated(w, pushed)),
                          key=lambda w: w.first_seen)

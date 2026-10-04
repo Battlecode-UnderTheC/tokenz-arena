@@ -280,3 +280,17 @@ def test_a_draining_machine_is_replaced_then_returned_once_empty(make):
     clock.t += 60
     s.tick()
     assert name not in s.state["instances"] and vast.destroyed
+
+
+def test_machines_sized_under_todays_rule_are_marked_for_replacement(make):
+    s, vast, clock = make(slots_per_thread=1.0, ram_per_slot_gb=0.5)
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    (_, body), = vast.created
+    name = body["env"]["WORKER_NAME"]
+    for i in vast.live.values():                          # what Vast reports for the instance
+        i.update(cpu_cores_effective=64, cpu_ram=252 * 1024)
+    s.state["instances"][name]["slots"] = 64
+    s.slots_per_thread = 4.0
+    s.tick()
+    assert s.state["instances"][name]["replace"].startswith("resize: 64 slots, now sized 256")

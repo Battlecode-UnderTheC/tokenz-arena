@@ -331,6 +331,11 @@ class Scaler:
                 v = live[name]
                 status = v.get("actual_status")
                 inst["status"] = status
+                # sized by today's rule? (slots_per_thread, ram_per_slot can change after renting)
+                fits = self.slots_of(v)
+                if fits and inst.get("slots", 0) < 0.8 * fits and not inst.get("replace"):
+                    inst["replace"] = f"resize: {inst.get('slots')} slots, now sized {fits}"
+                    self.note(f"{name}: {inst['replace']}; the engine drains it and a new machine replaces it")
                 # Outbid (interruptible) or stopped: Vast sets the intended/current state to
                 # "stopped" at once, while actual_status can still say "loading" for a machine
                 # outbid before it booted, so those are read first.
