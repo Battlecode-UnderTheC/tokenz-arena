@@ -350,6 +350,8 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
                 return await call_next(request)         # the engine's last snapshot
             if path.startswith("/api/") and (request.method not in ("GET", "HEAD", "OPTIONS")
                                              or path.startswith("/api/v1/server")
+                                             or path.startswith("/api/v1/duels")
+                                             or path.startswith("/api/v1/ephemeral")
                                              or path.startswith("/api/v1/workers/wasm/")):
                 headers = {k: v for k, v in request.headers.items() if k.lower() not in FORWARD_DROP}
                 headers["x-arena-client-ip"] = request.client.host if request.client else ""
@@ -684,7 +686,8 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
 
     for mod, attr in (("arena.web.pages", "router"), ("arena.web.docs", "router"),
                       ("arena.server.routes", "router"), ("arena.api.workers", "router"),
-                      ("arena.evals.web", "router"), ("arena.web.compare", "router")):
+                      ("arena.evals.web", "router"), ("arena.web.compare", "router"),
+                      ("arena.api.duels", "router")):
         try:
             m = __import__(mod, fromlist=[attr])
             app.include_router(m.make_router(arena) if hasattr(m, "make_router") else getattr(m, attr))

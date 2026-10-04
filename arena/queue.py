@@ -210,24 +210,37 @@ class GameQueue:
             self._bump()
 
     def _pick(self, limit: int, remote: bool) -> list:
-        """The next jobs in play order, without starting them (caller holds arena.lock)."""
+        """The next jobs in play order, without starting them (caller holds arena.lock). Duel
+        games (arena/duels.py) compete with owed games at their own priority, after drafts and
+        placement and before the rated top-up and the idle filler."""
+        from arena import duels as D
         from arena import scheduler as S
         a = self.arena
         running = a.running
         busy = collections.Counter(r["job"].owner for r in running.values())
         created = {sid: s.created for sid, s in a.subs.items()}
+        book = D.get(a)
+        with book.lock:
+            pending = {**self.pending, **{did: dq for did, dq in book.pending.items() if dq}}
+            done = {did: set(ns) for did, ns in book.done.items()}
+            created.update({did: u.created for did, u in book.duels.items()})
         out, seen = [], set()
-        heads: dict[str, int] = {}                 # sid -> index into its pending deque
+        heads: dict[str, int] = {}                 # sid (or duel id) -> index into its pending deque
+
+        def taken(j) -> bool:
+            if j.duel:
+                return j.key in running or j.key in seen or j.duel[1] in done.get(j.duel[0], ())
+            return (j.key in self.played or j.key in running or j.key in seen
+                    or (remote and j.suite == "holdout"))
 
         def head(sid):
-            dq = self.pending.get(sid)
+            dq = pending.get(sid)
             if not dq:
                 return None
             i = heads.get(sid, 0)
             while i < len(dq):
                 j = dq[i]
-                if (j.key in self.played or j.key in running or j.key in seen
-                        or (remote and j.suite == "holdout")):
+                if taken(j):
                     i += 1
                     continue
                 heads[sid] = i
@@ -237,7 +250,7 @@ class GameQueue:
 
         while len(out) < limit:
             best = None
-            for sid in self.pending:
+            for sid in pending:
                 j = head(sid)
                 if j is None:
                     continue
@@ -251,7 +264,7 @@ class GameQueue:
             seen.add(j.key)
             out.append(j)
             busy[j.owner] += 1
-        if out or any(self.pending.get(sid) and head(sid) for sid in self.pending):
+        if out or any(pending.get(sid) and head(sid) for sid in pending):
             return out
         # nothing owed: the top bots' holdout games, then background pairs
         taken = _Taken(self.played, running)
@@ -290,6 +303,9 @@ class GameQueue:
                 for sid in {sid for j in jobs for sid in self.owners.get(j.key, ())}:
                     self._settle(sid, rs)
                 self._trim()
+                from arena import duels as D
+                for did in {j.duel[0] for j in jobs if j.duel}:
+                    D.get(a).started(did)
         if jobs:
             self._bump()
         return jobs
@@ -343,10 +359,24 @@ class GameQueue:
             if not r or r.get("worker") != worker:
                 return
             a.running.pop(job.key, None)
+            if job.duel:
+                from arena import duels as D
+                D.get(a).release(job)
             for sid in self.owners.get(job.key, ()):
                 if job.key not in self.played and sid in self.pending:
                     self.pending[sid].appendleft(self.jobs[sid][job.key])
         self._bump()
+
+    def record_duel(self, job, res: dict, worker: str, replay) -> bool:
+        """A finished duel game: to its duel, never an arena Game."""
+        from arena import duels as D
+        with self.arena.lock:
+            r = self.arena.running.get(job.key)
+            if r and r.get("worker", "local") == worker:
+                self.arena.running.pop(job.key, None)
+        ok = D.get(self.arena).record(job, res, worker, replay)
+        self._bump()
+        return ok
 
     def is_played(self, key) -> bool:
         return key in self.played
@@ -378,6 +408,20 @@ class GameQueue:
                                 "priority": next(iter(self.jobs[sid].values())).lane}
                 by_lane[waiting[sid]["priority"]] += left
             checking = sorted(s.id for s in a.subs.values() if s.status == "checking")
+            from arena import duels as D
+            book = D.get(a)
+            with book.lock:
+                for did, u in book.duels.items():
+                    left = book.left(did)
+                    if not left:
+                        continue
+                    waiting[did] = {"owner": u.owner, "lane": "duel", "status": u.status, "left": left,
+                                    "total": len(u.schedule), "games_left": left,
+                                    "games_total": len(u.schedule), "priority": "duel",
+                                    "duel": {"a": u.a, "b": u.b}}
+                    if u.status != "waiting":     # backlog like any other: the scaler rents for it
+                        by_lane["duel"] += left
+                checking += sorted(e.id for e in book.ephemeral.values() if e.status == "checking")
         remote = reg.snapshot() if reg is not None else []
         local = d.workers if d is not None else 0
         out = {"version": v, "updated": now(), "live": True,

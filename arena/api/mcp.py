@@ -231,6 +231,57 @@ def make_server(app: FastAPI) -> MCPServer:
         promoted it."""
         return await api.call(ctx, "POST", f"/submissions/{id}/promote")
 
+    # -------------------------------------------------------------- duels (off the ladder)
+    @mcp.tool(annotations=WRITE)
+    async def ephemeral(ctx: Context, name: str, files: dict[str, str] | None = None,
+                        zip_base64: str | None = None, ttl_hours: float = 24,
+                        agent: str | None = None, owner: str | None = None) -> CallToolResult:
+        """Upload a bot for duels only: checked and compiled like a submission, but never on the
+        ladder, in ideas or lineage, and removed after ttl_hours (default 24). Give it as `files`
+        ({path: text}) or `zip_base64`, like submit. Returns {id: "eph-...", status: "checking"};
+        it's usable once status is "ready" (a compile, about a minute). The same zip again renews
+        it. Next: duel(a, b) with this id."""
+        if (files is None) == (zip_base64 is None):
+            raise ToolError("pass exactly one of files ({path: text}) or zip_base64")
+        try:
+            blob = build_zip(files) if files is not None else base64.b64decode(zip_base64, validate=True)
+        except (ValueError, TypeError) as e:
+            raise ToolError(f"can't build the zip: {e}") from e
+        return await api.call(ctx, "POST", "/ephemeral",
+                              data={"name": name, "ttl_hours": ttl_hours, "agent": agent, "owner": owner},
+                              files={"file": ("bot.zip", blob, "application/zip")})
+
+    @mcp.tool(annotations=WRITE)
+    async def duel(ctx: Context, a: str, b: str, suites: list[str] | None = None,
+                   maps: list[str] | None = None, seeds: str = "random:4", games: int | None = None,
+                   both_seats: bool = True, note: str = "", agent: str | None = None,
+                   owner: str | None = None) -> CallToolResult:
+        """Play bot a against bot b (any submission or ephemeral id) on fresh seeds, off the
+        ladder: nothing reaches ratings, verdicts or the leaderboard. suites: official,
+        tournament, server, custom, rotating (default the first three); maps: only these names;
+        seeds: "random:N" fresh seeds per map (default 4) or "S1,S2"; games: stop after this
+        many; both_seats: also play each game with seats swapped. The arena rents machines if
+        it's busy. Returns {id, games_planned}. Next: duel_result(id, wait_s)."""
+        return await api.call(ctx, "POST", "/duels", json_body={
+            "a": a, "b": b, "suites": suites, "maps": maps, "seeds": seeds, "games": games,
+            "both_seats": both_seats, "note": note, "agent": agent, "owner": owner})
+
+    @mcp.tool(annotations=READ)
+    async def duel_result(ctx: Context, id: str, wait_s: int = 0, games: bool = False) -> CallToolResult:
+        """A duel from a's side: status, played/left, record (W-D-L, score, 95% interval,
+        significant), by_suite, by_map, by_end (how games were decided), by_starters (starting
+        dragons per side), and sides.{a,b}: metrics averaged at r100-r400 and the end, queen
+        survival and death causes, deaths, CPU. wait_s (max 1800) blocks until it's done.
+        games=true adds each game with replay links."""
+        wait_s = max(0, min(int(wait_s), 1800))
+        return await api.call(ctx, "GET", f"/duels/{id}", params={"wait": wait_s, "games": str(games).lower()},
+                              timeout=wait_s + 60)
+
+    @mcp.tool(annotations=WRITE)
+    async def duel_cancel(ctx: Context, id: str) -> CallToolResult:
+        """Cancel a duel (yours): its unplayed games are dropped; played ones stay readable."""
+        return await api.call(ctx, "DELETE", f"/duels/{id}")
+
     # -------------------------------------------------------------- reading a submission
     @mcp.tool(annotations=READ)
     async def report(ctx: Context, id: str) -> CallToolResult:
@@ -423,7 +474,7 @@ def make_server(app: FastAPI) -> MCPServer:
     return mcp
 
 
-TOOLS = ("submit", "submission", "wait", "promote", "report", "source", "leaderboard", "bot",
+TOOLS = ("submit", "submission", "wait", "promote", "ephemeral", "duel", "duel_result", "duel_cancel", "report", "source", "leaderboard", "bot",
          "ideas", "games", "game", "map_stats", "maps", "upload_map", "edit_note", "set_parent", "retire", "server_link", "lineage", "metrics", "game_metrics",
          "submission_metrics", "evals",
          "queue", "server_status",

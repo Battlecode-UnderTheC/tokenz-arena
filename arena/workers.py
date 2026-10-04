@@ -149,9 +149,12 @@ class Registry:
                 "heartbeat_seconds": HEARTBEAT_SECONDS, "engine": ENGINE}
 
     def _describe(self, j: scheduler.Job) -> dict:
-        subs = self.arena.subs
-        return {"a": {"id": j.a, "sha256": subs[j.a].sha256}, "b": {"id": j.b, "sha256": subs[j.b].sha256},
-                "suite": j.suite, "map": {"name": self._map_name(j), "sha256": self.map_sha(j.map)},
+        from arena import duels
+        book = duels.get(self.arena)
+        # a duel game's maps are the duel's pinned copies: fetched as suite "duel-<id>/<suite>"
+        suite = f"{j.duel[0]}/{j.suite}" if j.duel else j.suite
+        return {"a": {"id": j.a, "sha256": book.bot(j.a).sha256}, "b": {"id": j.b, "sha256": book.bot(j.b).sha256},
+                "suite": suite, "map": {"name": self._map_name(j), "sha256": self.map_sha(j.map)},
                 "seed": j.seed, "lane": j.lane,
                 "timeout": self.arena.cfg.get("play", "game_timeout", 1800),
                 "judge": self.arena.cfg.get("play", "judge", "official"),

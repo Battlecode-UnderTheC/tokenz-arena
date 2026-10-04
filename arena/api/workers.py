@@ -113,8 +113,10 @@ def make_router(arena: Arena) -> APIRouter:
     @r.get("/bot/{sid}")
     def bot(sid: str, request: Request):
         token_name(arena, request)
-        s = arena.subs.get(sid)
-        p = arena.cfg.submissions / (s.id if s else sid) / "source.zip"
+        from arena import duels
+        book = duels.get(arena)
+        s = book.bot(sid)
+        p = book.bot_zip(s.id if s else sid)
         if not s or not p.exists():
             raise HTTPException(404, f"no submission {sid!r}")
         return FileResponse(p, media_type="application/zip", filename=f"{s.id}.zip")
@@ -133,6 +135,15 @@ def make_router(arena: Arena) -> APIRouter:
         if p is None or not p.exists():
             raise HTTPException(404, "not a compiled (C/C++) bot")
         return FileResponse(p, media_type="application/wasm", headers={"X-Wasm-Name": p.name})
+
+    @r.get("/map/{duel}/{suite}/{name}")
+    def duel_map(duel: str, suite: str, name: str, request: Request):
+        """A duel's pinned copy of a map (arena/duels.py)."""
+        token_name(arena, request)
+        p = arena.cfg.data_dir / "duels" / Path(duel).name / "maps" / Path(suite).name / f"{Path(name).name}.map"
+        if not duel.startswith("duel-") or not p.is_file():
+            raise HTTPException(404, f"no map {duel}/{suite}/{name}")
+        return FileResponse(p, media_type="text/plain", filename=p.name)
 
     @r.get("/map/{suite}/{name}")
     def map_file(suite: str, name: str, request: Request):

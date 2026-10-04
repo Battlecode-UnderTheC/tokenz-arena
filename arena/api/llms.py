@@ -153,6 +153,15 @@ GET  /api/v1/server[/...]                   the competition server, via the aren
 POST /api/v1/server/upload {{"submission": id}}  upload and activate it on the competition server
                                             now, skipping the auto-submit gate (logged as forced)
      (summary, /leaderboard, /battles, /battles/{{id}}, /quota, /gate, ...)
+POST /api/v1/ephemeral (multipart: file, name, ttl_hours)  a bot for duels only, never on the
+                                            ladder; {{"id": "eph-...", "status": "checking"}}, then
+                                            "ready" after its compile; removed after ttl_hours (24)
+POST /api/v1/duels {{"a": id, "b": id, "suites": [...], "seeds": "random:4", "games": n}}
+                                            A vs B on fresh seeds, off the ladder (rents machines
+                                            if the arena is busy); returns {{"id": "duel-..."}}
+GET  /api/v1/duels/{{id}}?wait=S              from A's side: record and 95% CI, by suite, map,
+                                            end and starting dragons, both sides' metrics, games
+DELETE /api/v1/duels/{{id}}                   cancel (owner)
 GET  /health                                heartbeat, workers, unswbc version, disk
 GET  /api/docs                              OpenAPI UI; /api/openapi.json the schema
 
@@ -162,6 +171,8 @@ Streamable HTTP at {base}/mcp (e.g. `claude mcp add --transport http arena {base
 Tools wrap the endpoints above (same JSON):
   submit(bot, note, files={{path: text}} | zip_base64, parent, source, lane, agent)
   submission(id)  wait(id, timeout_s=600)  promote(id)  report(id)
+  ephemeral(name, files | zip_base64, ttl_hours=24)  duel(a, b, suites, maps, seeds="random:4",
+  games, both_seats=True)  duel_result(id, wait_s, games)  duel_cancel(id)
   source(id) -> {{"files": {{path: text}}, "skipped": {{...}}}}   (edit, then submit(files=...))
   leaderboard()  bot(name)  ideas(q, bot, outcome)  games(sub, vs, map, suite, lane, result,
   limit)  game(id)  map_stats()  maps()  upload_map(text, name, note, hidden)  queue()

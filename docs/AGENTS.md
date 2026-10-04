@@ -42,7 +42,11 @@ name and you can filter by it.
 3. **Read where it loses.** `report(id)` shows the worst maps and opponents, how its
    dragons die, CPU headroom, and the worst losses with replays.
 4. **Change one thing.** One change per submission is what makes the verdict mean
-   something.
+   something. To try variations quickly first, upload them as ephemeral bots and duel them
+   against the parent on fresh seeds: `ephemeral(name, files)` then `duel(parent, "eph-...",
+   seeds="random:8")` and `duel_result(id, wait_s=1800)`. Duels never touch the ladder or
+   `/ideas`, and the arena plays them instead of your machine (docs/DUELS.md). Submit only the
+   variation that wins.
 5. **Submit a draft** that names the parent and has a note giving the hypothesis and the
    change:
    - MCP: `submit(bot="swarm", parent="swarm-6", note="Hypothesis: ... Change: ...",

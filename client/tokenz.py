@@ -272,6 +272,88 @@ def cmd_submit(args):
         return 1
 
 
+# ---------------------------------------------------------------------------- duels
+def cmd_ephemeral(args):
+    """A bot for duels only: checked and compiled like a submission, never on the ladder."""
+    if args.dir == "ls":
+        rows = get(args, "/api/v1/ephemeral", owner=args.owner)
+        return emit(args, rows, lambda rs: table([[r["id"], r["name"], r["status"], r["expires"], r.get("reason")]
+                                                   for r in rs], ["id", "name", "status", "expires", "reason"]))
+    if args.dir == "rm":
+        for i in args.ids:
+            emit(args, request(args, "DELETE", f"/api/v1/ephemeral/{urllib.parse.quote(i)}"),
+                 lambda d: print(f"removed {d['removed']}"))
+        return
+    d = Path(args.dir)
+    blob, names = build_zip(d)
+    body, ctype = multipart({"name": args.name or d.resolve().name, "ttl_hours": args.ttl,
+                             "agent": args.agent, "owner": args.owner}, "bot.zip", blob)
+    e = request(args, "POST", "/api/v1/ephemeral", body, ctype)
+    if not args.no_wait and e["status"] == "checking":
+        e = get(args, f"/api/v1/ephemeral/{e['id']}", wait=600)
+    emit(args, e, lambda e: print(f"{e['id']}  {e['status']}" + (f": {e.get('reason')}" if e.get("reason") else "")
+                                  + f"  (expires {e['expires']})"))
+    return 1 if e["status"] == "rejected" else None
+
+
+def show_duel(s: dict):
+    r = s["record"]
+    ci = f" (95% CI {r['ci'][0]}-{r['ci'][1]})" if r.get("ci") else ""
+    print(f"{s['id']}  {s['a']} vs {s['b']}  {s['status']}  {s['games_played']}/{s['games_planned']} played"
+          + (f", {s['games_running']} running" if s.get("games_running") else "")
+          + (f", {s['errors']} errors" if s.get("errors") else ""))
+    print(f"  {s['a']}: {r['W']}-{r['D']}-{r['L']}  score {r.get('score')}%{ci}"
+          + ("" if r.get("significant") else "  (within noise)" if r.get("games") else ""))
+    for k, title in (("by_suite", "suite"), ("by_end", "decided by"), ("by_starters", "starting dragons")):
+        rows = [[name, f"{x['W']}-{x['D']}-{x['L']}", x.get("score")] for name, x in (s.get(k) or {}).items()]
+        if rows:
+            print()
+            table(rows, [title, "W-D-L", "score %"])
+    sides = s.get("sides") or {}
+    if sides:
+        keys = [k for k in ("dragons@100", "dragons@300", "longest@300", "longest@400", "board_control@200",
+                            "tiles_visited@200", "queen_alive@end", "queen_length@end")
+                if k in sides["a"]["metrics"] or k in sides["b"]["metrics"]]
+        print()
+        table([[k, sides["a"]["metrics"].get(k), sides["b"]["metrics"].get(k)] for k in keys]
+              + [["queen alive at end %", sides["a"]["queen"]["alive_at_end_pct"], sides["b"]["queen"]["alive_at_end_pct"]],
+                 ["CPU max", sides["a"]["cpu"]["max"], sides["b"]["cpu"]["max"]]],
+              ["metric (mean)", s["a"], s["b"]])
+
+
+def cmd_duel(args):
+    if args.a == "show":
+        return emit(args, get(args, f"/api/v1/duels/{urllib.parse.quote(args.b)}"), show_duel)
+    if args.a == "cancel":
+        return emit(args, request(args, "DELETE", f"/api/v1/duels/{urllib.parse.quote(args.b)}"),
+                    lambda d: print(f"{d['id']}: {d['status']}"))
+    if args.a == "ls":
+        return emit(args, get(args, "/api/v1/duels", owner=args.owner),
+                    lambda rs: table([[r["id"], r["a"], r["b"], r["status"], f"{r['games_planned'] - r['games_left']}/{r['games_planned']}"]
+                                      for r in rs], ["id", "a", "b", "status", "played"]))
+    if not args.b:
+        raise Fail("tokenz duel A B [...]  (or: duel show|cancel ID, duel ls)")
+    body = {"a": args.a, "b": args.b, "suites": args.suite.split(","), "seeds": args.seeds,
+            "both_seats": not args.one_seat, "note": args.note, "agent": args.agent, "owner": args.owner}
+    if args.maps:
+        body["maps"] = args.maps.split(",")
+    if args.games:
+        body["games"] = args.games
+    d = request(args, "POST", "/api/v1/duels", json.dumps(body).encode(), "application/json")
+    if not args.json:
+        print(f"{d['id']}: {d['games_planned']} games ({d['status']})", file=sys.stderr)
+    if not args.wait:
+        return emit(args, d, lambda d: None)
+    deadline = time.time() + args.timeout
+    while True:
+        s = get(args, f"/api/v1/duels/{d['id']}", wait=int(max(1, min(300, deadline - time.time()))), games="false")
+        if s["status"] in ("done", "cancelled", "failed") or time.time() >= deadline:
+            break
+        if not args.json:
+            print(f"  ... {s['games_played']}/{s['games_planned']} played, {s['games_running']} running", file=sys.stderr)
+    emit(args, s, show_duel)
+
+
 def wait_for(args, sid: str, timeout: float) -> dict:
     deadline = time.time() + timeout
     while True:
@@ -629,6 +711,29 @@ def main(argv=None) -> int:
     s.add_argument("--wait", action="store_true", help="wait for the verdict and print it")
     s.add_argument("--timeout", type=float, default=1800, help="seconds to wait (default 1800)")
     s.set_defaults(f=cmd_submit)
+
+    s = sp.add_parser("ephemeral", help="upload a bot for duels only (never on the ladder; expires)")
+    s.add_argument("dir", help="the bot's directory (has bot.toml), or 'ls', or 'rm'")
+    s.add_argument("ids", nargs="*", help="with rm: the ephemeral ids to remove")
+    s.add_argument("--name", help="a label (default: the directory's name)")
+    s.add_argument("--ttl", type=float, default=24, help="hours before it's removed (default 24)")
+    s.add_argument("--owner", help="your name, only for shared machines without a Tailscale login")
+    s.add_argument("--no-wait", action="store_true", help="don't wait for its compile")
+    s.set_defaults(f=cmd_ephemeral)
+    s = sp.add_parser("duel", help="play A vs B on fresh seeds, off the ladder (rents machines if busy)")
+    s.add_argument("a", help="a submission or ephemeral id (or: show, cancel, ls)")
+    s.add_argument("b", nargs="?", help="the other bot (or the duel id for show/cancel)")
+    s.add_argument("--suite", default="official,tournament,server",
+                   help="map suites: official, tournament, server, custom, rotating (default: the first three)")
+    s.add_argument("--maps", help="only these maps (comma-separated names)")
+    s.add_argument("--seeds", default="random:4", help="'random:N' fresh seeds per map (default 4) or 'S1,S2,...'")
+    s.add_argument("--games", type=int, help="stop after this many games")
+    s.add_argument("--one-seat", action="store_true", help="don't also play each game with seats swapped")
+    s.add_argument("--note", default="", help="what this tests")
+    s.add_argument("--owner", help="your name, only for shared machines without a Tailscale login")
+    s.add_argument("--wait", action="store_true", help="wait for every game and print the result")
+    s.add_argument("--timeout", type=float, default=3600, help="seconds to wait (default 3600)")
+    s.set_defaults(f=cmd_duel)
 
     s = sp.add_parser("wait", help="wait until a submission's games are done, then show it")
     s.add_argument("id")

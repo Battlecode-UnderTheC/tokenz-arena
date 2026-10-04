@@ -29,15 +29,18 @@ class Job:
     map: str            # path to the .map file
     seed: int
     owner: str
-    for_sub: str        # the submission this game is owed to
+    for_sub: str        # the submission this game is owed to (a duel's id for a duel game)
+    duel: tuple | None = None     # (duel id, game number): a duel game (arena/duels.py)
 
     @functools.cached_property
     def key(self) -> tuple:      # cached: the queue and the scheduler ask for it thousands of times
+        if self.duel:            # never the same as a ladder game's, even on the same pair, map and seed
+            return ("duel",) + tuple(self.duel)
         return (self.a, self.b, self.suite, Path(self.map).stem, self.seed)
 
     @property
     def lane(self) -> str:
-        return LANES[self.priority]
+        return "duel" if self.duel else LANES[self.priority]
 
 
 _MAPS: dict = {}

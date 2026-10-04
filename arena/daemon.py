@@ -52,6 +52,8 @@ class Daemon:
         # engine's process busy enough that its API took 10-20 s.
         self._rate_due = False
         self.every(RATE_SECONDS, self._rate_if_due, "ratings")
+        from arena import duels
+        self.every(300, lambda: duels.get(arena).expire(), "duels-expire")
 
     def install_maps(self):
         """Keeps the worldgen suites current: this week's rotating maps and the holdout."""
@@ -105,9 +107,13 @@ class Daemon:
         check_free = self.check_slots - len(self.checking)
         with a.lock:
             pending = [s for s in a.subs.values() if s.status == CHECKING and s.id not in self.checking]
+        from arena import duels
+        book = duels.get(a)
+        with book.lock:
+            pending += [e for e in book.ephemeral.values() if e.status == CHECKING and e.id not in self.checking]
         for s in sorted(pending, key=lambda s: s.created)[:max(0, check_free)]:
             self.checking.add(s.id)
-            self.checks.submit(self._check, s)
+            self.checks.submit(self._check_ephemeral if duels.is_ephemeral(s.id) else self._check, s)
         q = queue.get(a)
         q.sync()
         if time.monotonic() - self._snapshot_at >= queue.SNAPSHOT_SECONDS:
@@ -136,6 +142,15 @@ class Daemon:
             self.checking.discard(s.id)
             self.wake.set()
 
+    def _check_ephemeral(self, e):
+        from arena import duels
+        try:
+            ok = duels.get(self.arena).check_ephemeral(e)
+            log.info("check %s: %s", e.id, "ok" if ok else f"rejected ({e.reason})")
+        finally:
+            self.checking.discard(e.id)
+            self.wake.set()
+
     def _play(self, job: scheduler.Job):
         cfg = self.arena.cfg
         try:
@@ -156,6 +171,14 @@ class Daemon:
         expired lease's game was played again elsewhere and both results arrive."""
         a, cfg = self.arena, self.arena.cfg
         q = queue.get(a)
+        if job.duel:                     # a duel game: stored with its duel, never an arena Game
+            if replay is None and res.get("replay"):
+                replay = Path(res["replay"])
+            ok = q.record_duel(job, res, worker, replay)
+            log.info("duel game %s %s vs %s on %s (%s): %s", job.duel, job.a, job.b, Path(job.map).stem,
+                     worker, res.get("error") or res.get("winner") or "draw")
+            self.wake.set()
+            return ok
         g = Game(id=0, lane=job.lane, suite=job.suite, map=Path(job.map).stem, seed=job.seed,
                  a=job.a, b=job.b, meta={"engine": ENGINE, "worker": worker})
         try:
