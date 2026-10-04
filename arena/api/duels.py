@@ -106,7 +106,8 @@ def make_router(arena: Arena) -> APIRouter:
         out = sorted((u for u in b.duels.values() if not owner or u.owner == owner),
                      key=lambda u: u.created, reverse=True)[:limit]
         return [{"id": u.id, "owner": u.owner, "a": u.a, "b": u.b, "status": u.status, "created": u.created,
-                 "games_planned": u.games_planned, "games_left": b.left(u.id), "note": u.note,
+                 "games_planned": u.games_planned, "games_left": b.left(u.id),
+                 "games_played": len(b.done.get(u.id, ())), "note": u.note,
                  "url": f"/api/v1/duels/{u.id}"} for u in out]
 
     @r.get("/api/v1/duels/{did}")

@@ -35,7 +35,7 @@ async function load() {
   document.getElementById("duels").innerHTML = ds.length ? table(
     ["duel", "A", "B", "status", "played", "owner", "created", "note"],
     ds.map((d) => [`<a href="/duels/${d.id}">${d.id}</a>`, bot(d.a), bot(d.b), status(d.status),
-                   `${d.games_planned - d.games_left}/${d.games_planned}`, esc(d.owner), esc(d.created), esc(d.note)]))
+                   `${d.games_played}/${d.games_planned}`, esc(d.owner), esc(d.created), esc(d.note)]))
     : "<p class='muted'>No duels yet.</p>";
   document.getElementById("eph").innerHTML = es.length ? table(
     ["id", "name", "status", "owner", "expires", "reason"],
@@ -82,15 +82,20 @@ async function load() {
   document.getElementById("by_map").innerHTML = maps.length ? table(["map", "W-D-L", "score (95% CI)"],
     maps.map(([k, v]) => [esc(k), wdl(v), score(v)])) : "<p class='muted'>-</p>";
   const sa = d.sides.a, sb = d.sides.b;
+  const fmt = (v) => v == null ? "-" : (Math.abs(v) < 10 && !Number.isInteger(v) ? v.toFixed(2) : String(Math.round(v * 10) / 10));
   const rows = [];
-  for (const k of KEYS) for (const rnd of ROUNDS) {
-    const key = `${k}@${rnd}`, x = sa.metrics[key], y = sb.metrics[key];
-    if (x == null && y == null) continue;
-    const better = x == null || y == null || x === y ? "" : (x > y ? "a" : "b");
-    rows.push([esc(k), rnd === "end" ? "end" : `r${rnd}`, `<span class="${better === "a" ? "W" : ""}">${x ?? "-"}</span>`,
-               `<span class="${better === "b" ? "W" : ""}">${y ?? "-"}</span>`]);
+  for (const k of KEYS) {
+    const cells = ROUNDS.map((rnd) => {
+      const x = sa.metrics[`${k}@${rnd}`], y = sb.metrics[`${k}@${rnd}`];
+      if (x == null && y == null) return "";
+      const hi = x == null || y == null || x === y ? "" : (x > y ? "a" : "b");
+      return `<span class="${hi === "a" ? "W" : ""}">${fmt(x)}</span> / <span class="${hi === "b" ? "W" : ""}">${fmt(y)}</span>`;
+    });
+    if (cells.some((c) => c)) rows.push([esc(k), ...cells]);
   }
-  document.getElementById("sides").innerHTML = rows.length ? table(["metric", "round", esc(d.a), esc(d.b)], rows)
+  document.getElementById("sides").innerHTML = rows.length
+    ? `<p class="sub">each cell: ${esc(d.a)} / ${esc(d.b)}; the higher one in green</p>`
+      + table(["metric", ...ROUNDS.map((r) => r === "end" ? "end" : `r${r}`)], rows)
     : "<p class='muted'>No metrics yet.</p>";
   const causes = (q) => Object.entries(q.causes || {}).map(([c, n]) => `${esc(c)} ${n}`).join(", ") || "-";
   const deaths = (s) => Object.entries(s.deaths || {}).slice(0, 4).map(([c, n]) => `${esc(c)} ${n}`).join(", ") || "-";

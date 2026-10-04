@@ -329,7 +329,7 @@ def cmd_duel(args):
                     lambda d: print(f"{d['id']}: {d['status']}"))
     if args.a == "ls":
         return emit(args, get(args, "/api/v1/duels", owner=args.owner),
-                    lambda rs: table([[r["id"], r["a"], r["b"], r["status"], f"{r['games_planned'] - r['games_left']}/{r['games_planned']}"]
+                    lambda rs: table([[r["id"], r["a"], r["b"], r["status"], f"{r.get('games_played', r['games_planned'] - r['games_left'])}/{r['games_planned']}"]
                                       for r in rs], ["id", "a", "b", "status", "played"]))
     if not args.b:
         raise Fail("tokenz duel A B [...]  (or: duel show|cancel ID, duel ls)")

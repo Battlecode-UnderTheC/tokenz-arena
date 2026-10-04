@@ -168,3 +168,11 @@ def test_duels_pages(setup):
     assert r.status_code == 200 and f'const did = "{did}";' in r.text
     assert "fetch(`/api/v1/duels/${did}`)" in r.text and "$" + did not in r.text   # the script asks for this duel
     assert c.get("/duels/duel-x<script>").status_code == 404
+
+
+def test_cancelled_duel_lists_only_games_actually_played(setup):
+    a, d, c, (p, q) = setup
+    did = c.post("/api/v1/duels", json={"a": p.id, "b": q.id, "suites": ["official"]}).json()["id"]
+    c.delete(f"/api/v1/duels/{did}")
+    row = next(x for x in c.get("/api/v1/duels").json() if x["id"] == did)
+    assert row["games_played"] == 0
