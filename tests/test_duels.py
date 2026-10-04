@@ -165,5 +165,6 @@ def test_duels_pages(setup):
     r = c.get("/duels")
     assert r.status_code == 200 and "Duels" in r.text and 'href="/duels"' in r.text
     r = c.get(f"/duels/{did}")
-    assert r.status_code == 200 and f'"{did}"' in r.text
+    assert r.status_code == 200 and f'const did = "{did}";' in r.text
+    assert "fetch(`/api/v1/duels/${did}`)" in r.text and "$" + did not in r.text   # the script asks for this duel
     assert c.get("/duels/duel-x<script>").status_code == 404

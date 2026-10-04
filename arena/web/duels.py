@@ -45,7 +45,7 @@ async function load() {
 load(); setInterval(load, 15000);
 </script>"""
 
-DETAIL = """<h1 id="title">Duel {did}</h1>
+DETAIL = """<h1 id="title">Duel __DIDTEXT__</h1>
 <p class="sub" id="meta">loading…</p>
 <div class="grid2">
 <div><h2>Record <span class="sub">from A's side</span></h2><div id="record"></div>
@@ -128,7 +128,7 @@ def make_router(arena) -> APIRouter:
         from fastapi import HTTPException
         if not re.fullmatch(r"duel-[a-z0-9]{1,32}", did):     # it goes into the page's script
             raise HTTPException(404, "no such duel")
-        return layout(f"Duel {did}", DETAIL.replace("{did}", e(did)).replace("__DID__", json.dumps(did)),
+        return layout(f"Duel {did}", DETAIL.replace("__DIDTEXT__", e(did)).replace("__DID__", json.dumps(did)),
                       f"/api/v1/duels/{did}", "/duels")
 
     return r
