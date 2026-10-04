@@ -129,6 +129,7 @@ class Scaler:
         self.min_reliability = float(g("min_reliability", 0.98))
         self.slots_per_thread = float(g("slots_per_thread", 4.0))      # games are metered in CPU points, not wall time: overcommit only slows them
         self.ram_per_slot = float(g("ram_per_slot_gb", 1.5))
+        self.avoid_s = float(g("avoid_hours", 2.0)) * 3600
         self.disk_gb = float(g("disk_gb", 40))
         self.max_bandwidth = float(g("max_bandwidth_per_gb", 0.02))
         self.max_per_slot_hour = float(g("max_per_slot_hour", 0.02))
@@ -162,6 +163,7 @@ class Scaler:
         self.state.setdefault("paused", False)
         self.state.setdefault("rents", [])
         self.state.setdefault("boot_failures", 0)
+        self.state.setdefault("avoid", {})          # machine_id -> until (epoch s): it failed us
 
     # ------------------------------------------------------------------ bookkeeping
     def today(self) -> str:
@@ -230,6 +232,11 @@ class Scaler:
         # never a second instance on a machine we hold: on an interruptible machine the higher
         # bid pauses the other, so we outbid ourselves, again and again, at a rising price
         ours = {i.get("machine_id") for i in self.state["instances"].values()} - {None}
+        # and none that failed us lately (outbid, ended on its own, never joined): the cheapest
+        # offer is often the same flaky machine, rented and lost over and over
+        now = self.clock()
+        self.state["avoid"] = {m: u for m, u in self.state["avoid"].items() if u > now}
+        ours |= {int(m) for m in self.state["avoid"]}
         for o in self.vast.offers(self.query()):
             if float(o.get("cpu_cores_effective") or 0) < self.min_threads:
                 continue
@@ -286,6 +293,11 @@ class Scaler:
                   f"{' interruptible' if self.interruptible else ''}, {inst['where']})")
         return inst
 
+    def shun(self, inst: dict):
+        """Skip this instance's machine for avoid_hours (default 2): it failed us."""
+        if inst.get("machine_id") is not None:
+            self.state["avoid"][str(inst["machine_id"])] = self.clock() + self.avoid_s
+
     def retire(self, name: str, why: str):
         inst = self.state["instances"].get(name)
         if not inst:
@@ -322,6 +334,7 @@ class Scaler:
                 with tokens_file(self.cfg) as d:
                     if name in d:
                         d[name]["revoked"] = True
+                self.shun(inst)
                 if inst.get("seen_t"):
                     self.note(f"{name} is gone from Vast (ended outside the scaler)")
                 else:                                  # died before it ever joined: a boot failure
@@ -418,8 +431,10 @@ class Scaler:
             for name, inst in list(self.state["instances"].items()):
                 if inst.get("paused_t") and t - inst["paused_t"] >= self.paused_s:
                     # outbid (before or after joining): not a boot failure
+                    self.shun(inst)
                     self.retire(name, f"outbid (paused {(t - inst['paused_t']) / 60:.0f} min)")
                 elif not inst.get("seen_t") and t - inst["created_t"] > self.boot_s:
+                    self.shun(inst)
                     self.retire(name, f"never joined within {self.boot_s / 60:.0f} min")
                     self.state["boot_failures"] += 1
                     if self.state["boot_failures"] >= self.max_boot_failures:

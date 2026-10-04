@@ -311,3 +311,20 @@ def test_a_machine_it_rented_never_counts_as_owned(make):
         t["vast-gone"] = {"token": "x", "revoked": True}       # rented, then died
     p = s.plan(queue(left=3000, remote=[{"name": "vast-gone", "slots": 768, "running": 0}]))
     assert p["own_slots"] == 20
+
+
+def test_a_machine_that_failed_us_is_skipped_for_a_while(make):
+    s, vast, clock = make()
+    vast.offers = lambda q: [{**o, "machine_id": 100 + o["id"]} for o in OFFERS]
+    s.queue = lambda: queue(left=3000)
+    s.tick()
+    (offer, body), = vast.created
+    name = body["env"]["WORKER_NAME"]
+    assert s.state["instances"][name]["machine_id"] == 100 + offer
+    vast.live.clear()                                     # it ends on its own
+    clock.t += 60
+    s.tick()
+    assert offer not in {o["id"] for o in s.ranked_offers()}
+    assert vast.created[-1][0] != offer                   # the next rental is another machine
+    clock.t += 3 * 3600
+    assert offer in {o["id"] for o in s.ranked_offers()}
