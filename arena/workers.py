@@ -48,6 +48,7 @@ class Worker:
     last_seen: float = field(default_factory=time.time)
     done: list = field(default_factory=list)     # monotonic times of recorded results
     build: str | None = None        # its code (arena/worker.py build_id); None from older workers
+    leases_seen: list = field(default_factory=list)   # recent (seconds taken, wanted, given)
 
 
 _DYN: dict = {}
@@ -176,6 +177,7 @@ class Registry:
               build: str | None = None) -> dict:
         self._touch(name, host, version, slots, token, build)
         a, out = self.arena, []
+        t0 = time.monotonic()
         if want > 0 and not self.daemon.paused_remote and self.draining() != name:
             def lease_of(j):               # holdout games never leave this machine (take skips them)
                 lid = secrets.token_hex(8)
@@ -184,6 +186,9 @@ class Registry:
                 return {"lease": lid}
             for j in queue.get(a).take(want, name, lease_of):
                 out.append({"lease": a.running[j.key]["lease"], "game": self._describe(j)})
+        w = self.workers.get(name)
+        if w is not None and want > 0:
+            w.leases_seen = (w.leases_seen + [(time.monotonic() - t0, want, len(out))])[-200:]
         return {"leases": out, "lease_seconds": self.lease_seconds,
                 "heartbeat_seconds": HEARTBEAT_SECONDS, "engine": ENGINE}
 
@@ -286,8 +291,19 @@ class Registry:
                             "running": running.get(w.name, 0), "games_last_hour": len(w.done),
                             "token": w.token, "first_seen": w.first_seen, "build": w.build,
                             "outdated": self.outdated(w, pushed), "draining": w.name == draining,
-                            "last_seen_s": round(time.time() - w.last_seen)})
+                            "last_seen_s": round(time.time() - w.last_seen),
+                            "lease": _lease_stats(w.leases_seen)})
         return sorted(out, key=lambda w: w["name"])
+
+
+def _lease_stats(seen: list) -> dict | None:
+    """Its last (up to 200) lease calls: how long they took and how many games they gave."""
+    if not seen:
+        return None
+    ts = sorted(x[0] for x in seen)
+    return {"calls": len(seen), "p50_ms": round(1000 * ts[len(ts) // 2]), "max_ms": round(1000 * ts[-1]),
+            "wanted": sum(x[1] for x in seen), "given": sum(x[2] for x in seen),
+            "empty": sum(1 for x in seen if x[2] == 0)}
 
 
 def install(arena: Arena, daemon) -> Registry | None:
