@@ -127,7 +127,7 @@ class Scaler:
         # big machines: each new one pulls the image and compiles every bot it meets, once
         self.min_threads = int(g("min_threads", 64))
         self.min_reliability = float(g("min_reliability", 0.98))
-        self.slots_per_thread = float(g("slots_per_thread", 1.0))      # one game per hardware thread
+        self.slots_per_thread = float(g("slots_per_thread", 1.25))     # a game leaves its core idle part of the time (start-up, replay, upload)
         self.ram_per_slot = float(g("ram_per_slot_gb", 1.5))
         self.disk_gb = float(g("disk_gb", 40))
         self.max_bandwidth = float(g("max_bandwidth_per_gb", 0.02))

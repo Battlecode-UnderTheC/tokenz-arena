@@ -61,7 +61,7 @@ like any worker's.
 | `max_per_hour`, `max_per_day`, `max_instances` | 1.0, 10.0, 6 | Caps. |
 | `idle_minutes`, `min_minutes`, `boot_minutes` | 10, 20, 15 | Shrinking and broken-machine timeouts. |
 | `min_threads`, `min_reliability`, `ram_per_slot_gb`, `disk_gb`, `max_bandwidth_per_gb`, `max_per_slot_hour` | 64, 0.98, 1.5, 40, 0.02, 0.02 | Which offers qualify. |
-| `slots_per_thread` | 1.0 | Games per hardware thread. |
+| `slots_per_thread` | 1.25 | Games per hardware thread (`cpu_cores_effective`, which is the share vast gives a container, e.g. 64 of 256 at gpu_frac 0.25). Above 1 because a game doesn't keep its core busy the whole time. |
 | `image` | `registry.syeyoung.dev/undertehc/tokenz-arena-worker:latest` | The minimal worker image (`docker/worker.Dockerfile`: Python, the judge, Tailscale and the worker's own modules; ~420 MB), built and pushed by `deploy/update.sh` on every deploy (`registry-push` holds the read-write login; rented machines get the read-only `registry-login`). |
 | `max_rents_per_hour`, `max_boot_failures`, `engine_down_minutes` | 4, 2, 10 | Safety limits (above). |
 | `worker_idle_minutes`, `worker_orphan_minutes` | 30, 20 | When a rented worker destroys its own instance. |
