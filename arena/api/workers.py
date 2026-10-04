@@ -71,10 +71,12 @@ def make_router(arena: Arena) -> APIRouter:
         host = caller(request).owner
         # in a thread: picking games waits for the arena lock, and on the event loop that held
         # up every other request (other workers' results and leases included)
-        return await run_in_threadpool(call, reg().lease, str(d["worker"])[:64], host, str(d.get("version")),
-                                       int(d.get("slots", 0)), tok,
-                                       max(0, min(int(d.get("want", d.get("slots", 0))), 256)),
-                                       str(d["build"])[:32] if d.get("build") else None)
+        out = await run_in_threadpool(call, reg().lease, str(d["worker"])[:64], host, str(d.get("version")),
+                                      int(d.get("slots", 0)), tok,
+                                      max(0, min(int(d.get("want", d.get("slots", 0))), 256)),
+                                      str(d["build"])[:32] if d.get("build") else None)
+        reg().note_pids(str(d["worker"])[:64], d.get("pids"), d.get("pids_max"))
+        return out
 
     @r.post("/bye")
     async def bye(request: Request):
@@ -94,9 +96,11 @@ def make_router(arena: Arena) -> APIRouter:
     async def heartbeat(request: Request):
         tok = token_name(arena, request)
         d = await body(request)
-        return await run_in_threadpool(call, reg().heartbeat, str(d["worker"])[:64], caller(request).owner,
-                                       str(d.get("version")), int(d.get("slots", 0)), tok,
-                                       [str(x) for x in d.get("leases") or []])
+        out = await run_in_threadpool(call, reg().heartbeat, str(d["worker"])[:64], caller(request).owner,
+                                      str(d.get("version")), int(d.get("slots", 0)), tok,
+                                      [str(x) for x in d.get("leases") or []])
+        reg().note_pids(str(d["worker"])[:64], d.get("pids"), d.get("pids_max"))
+        return out
 
     @r.post("/result")
     async def result(request: Request, meta: str = Form(...), replay: UploadFile | None = File(None)):

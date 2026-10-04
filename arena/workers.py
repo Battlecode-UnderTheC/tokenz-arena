@@ -49,6 +49,7 @@ class Worker:
     done: list = field(default_factory=list)     # monotonic times of recorded results
     build: str | None = None        # its code (arena/worker.py build_id); None from older workers
     leases_seen: list = field(default_factory=list)   # recent (seconds taken, wanted, given)
+    pids: list = field(default_factory=lambda: [None, None])   # its container's tasks now, and the cap
 
 
 _DYN: dict = {}
@@ -131,6 +132,11 @@ class Registry:
         with self.lock:
             w = self.workers.get(worker)
             return w.token if w else None
+
+    def note_pids(self, name: str, cur, mx):
+        w = self.workers.get(name)
+        if w is not None:
+            w.pids = [cur if isinstance(cur, int) else None, mx if isinstance(mx, int) else None]
 
     def _touch(self, name: str, host: str, version: str, slots: int, token: str,
                build: str | None = None) -> Worker:
@@ -348,7 +354,7 @@ class Registry:
                             "token": w.token, "first_seen": w.first_seen, "build": w.build,
                             "outdated": self.outdated(w, pushed), "draining": w.name == draining,
                             "last_seen_s": round(time.time() - w.last_seen),
-                            "lease": _lease_stats(w.leases_seen)})
+                            "lease": _lease_stats(w.leases_seen), "pids": w.pids[0], "pids_max": w.pids[1]})
         return sorted(out, key=lambda w: w["name"])
 
 

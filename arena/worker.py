@@ -23,6 +23,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import concurrent.futures as cf
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
@@ -73,6 +74,8 @@ class Worker:
         self.heartbeat_seconds = 30
         self.procs = self._new_pool()
         self.pool_lock = threading.Lock()
+        self.prep = cf.ThreadPoolExecutor(16, thread_name_prefix="prep")    # fetch bots, map; start
+        self.send = cf.ThreadPoolExecutor(16, thread_name_prefix="send")    # return results
         self.fetch_lock = threading.Lock()
         self.wasm_locks: dict = collections.defaultdict(threading.Lock)
         self.idle_exit = idle_exit                 # exit after this long with nothing to do (0: never)
@@ -108,7 +111,9 @@ class Worker:
         return json.loads(self._req("POST", path, json.dumps(payload).encode(), "application/json"))
 
     def _hello(self) -> dict:
-        return {"worker": self.name, "version": ENGINE, "slots": self.slots, "build": build_id()}
+        cur, mx = self.pids()
+        return {"worker": self.name, "version": ENGINE, "slots": self.slots, "build": build_id(),
+                "pids": cur, "pids_max": mx}
 
     # ------------------------------------------------------------------ cache
     def _fetch(self, path: str, dest: Path, sha: str) -> Path:
@@ -173,24 +178,41 @@ class Worker:
 
     # ------------------------------------------------------------------ games
     def play(self, lease: str, game: dict):
-        replay = None
+        """Starts one leased game without a thread of its own: a small pool fetches its bots and
+        map and hands it to the process pool, whose callback sends the result from another small
+        pool. (A thread per game hit the container's process/thread limit at a few hundred slots:
+        "can't start new thread", and the machine destroyed itself.)"""
+        self.prep.submit(self._prepare, lease, game)
+
+    def _prepare(self, lease: str, game: dict):
+        pool = self.procs
         try:
             a, b = self.bot(game["a"]), self.bot(game["b"])
             m = self.map(game["suite"], game["map"])
             work = self.cache / "work"
             work.mkdir(parents=True, exist_ok=True)
-            pool = self.procs
+            fut = pool.submit(judge.run_game, str(m), str(a), str(b), int(game["seed"]),
+                              str(work / "replays"), str(work), float(game.get("timeout", 1800)),
+                              game.get("judge", "official"), bool(game.get("check")))
+        except Exception as e:
+            self.send.submit(self._finish, lease, None, e, pool)
+            return
+        fut.add_done_callback(lambda f: self.send.submit(self._finish, lease, f, None, pool))
+
+    def _finish(self, lease: str, fut, err: Exception | None, pool):
+        replay = None
+        try:
             try:
-                res = pool.submit(judge.run_game, str(m), str(a), str(b), int(game["seed"]),
-                                  str(work / "replays"), str(work), float(game.get("timeout", 1800)),
-                                  game.get("judge", "official"), bool(game.get("check"))).result()
+                if err is not None:
+                    raise err
+                res = fut.result()
             except (BrokenProcessPool, RuntimeError) as e:
                 if isinstance(e, BrokenProcessPool) or "after shutdown" in str(e):
                     self._rebuild_pool(pool)
                 raise                       # reported as the worker's failure: the engine replays it
             replay = Path(res.pop("replay")) if res.get("replay") else None
         except Exception as e:
-            log.exception("lease %s failed", lease)
+            log.error("lease %s failed: %s: %s", lease, type(e).__name__, str(e)[:300])
             res = {"error": f"worker {self.name}: {type(e).__name__}: {e}"[:2000]}
         try:
             self._send_result(lease, res, replay)
@@ -201,6 +223,19 @@ class Worker:
                 replay.unlink()
             with self.lock:
                 self.active.pop(lease, None)
+
+    @staticmethod
+    def pids() -> tuple[int | None, int | None]:
+        """(tasks now, the most allowed) for this container's cgroup: processes and threads both
+        count. (None, None) where there's no limit to read."""
+        for base in ("/sys/fs/cgroup", "/sys/fs/cgroup/pids"):
+            try:
+                cur = int(Path(base, "pids.current").read_text())
+                mx = Path(base, "pids.max").read_text().strip()
+                return cur, (None if mx == "max" else int(mx))
+            except (OSError, ValueError):
+                continue
+        return None, None
 
     def goodbye(self, reason: str):
         """Tells the arena why this worker is stopping, with its last log lines, before a rented
@@ -243,6 +278,11 @@ class Worker:
         while not self.stopping.is_set():
             with self.lock:
                 free = self.slots + self.prefetch - len(self.active)
+            cur, mx = self.pids()
+            if mx and cur is not None and cur > 0.8 * mx:
+                if free > 0:
+                    log.warning("%d of %d processes/threads in use: taking no new games for now", cur, mx)
+                free = 0                    # near the container's limit: wait for games to finish
             if free <= 0:
                 time.sleep(1)
                 continue
@@ -273,7 +313,12 @@ class Worker:
             for l in leases:
                 with self.lock:
                     self.active[l["lease"]] = l["game"]
-                threading.Thread(target=self.play, args=(l["lease"], l["game"]), daemon=True).start()
+                try:
+                    self.play(l["lease"], l["game"])
+                except RuntimeError as e:     # can't even queue it: its lease expires, it's replayed
+                    log.error("couldn't start lease %s: %s", l["lease"], e)
+                    with self.lock:
+                        self.active.pop(l["lease"], None)
             idle = 0 if leases else min(idle + 1, 6)
             if leases:
                 self.last_work = time.monotonic()
@@ -305,14 +350,16 @@ def main(args) -> int:
                Path(args.cache or env("ARENA_CACHE") or "~/.cache/tokenz-arena-worker").expanduser(), idle,
                int(env("ARENA_PREFETCH")) if env("ARENA_PREFETCH") else None)
     w.orphan_after = float(env("ARENA_ORPHAN_MINUTES") or 0) * 60
-    try:                                   # a game process holds a few files: hundreds of slots need more
+    try:                 # hundreds of slots need more files and processes than the defaults allow
         import resource
-        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-        want = hard if hard != resource.RLIM_INFINITY else 1 << 20
-        if soft < want:
-            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+        for lim in (resource.RLIMIT_NOFILE, resource.RLIMIT_NPROC):
+            soft, hard = resource.getrlimit(lim)
+            if soft != hard:
+                resource.setrlimit(lim, (hard, hard))
+        log.info("limits: files %s, processes %s, cgroup tasks %s", resource.getrlimit(resource.RLIMIT_NOFILE)[0],
+                 resource.getrlimit(resource.RLIMIT_NPROC)[0], Worker.pids())
     except (ImportError, ValueError, OSError) as e:
-        log.warning("couldn't raise the open-file limit: %s", e)
+        log.warning("couldn't raise the file/process limits: %s", e)
     def stop(signum, _):
         w.exit_reason = w.exit_reason or f"signal {signum}"
         w.stopping.set()
