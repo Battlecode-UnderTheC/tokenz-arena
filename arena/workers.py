@@ -117,6 +117,7 @@ class Registry:
         # results are recorded here, so a worker gets its answer (and frees its slot) without
         # waiting out the arena lock, the metrics and the replay's compression
         self.recorder = cf.ThreadPoolExecutor(4, thread_name_prefix="record")
+        self._load_leases()
         self.ack_after = float(arena.cfg.get("workers", "ack_after_s", 2.0))
 
     # ------------------------------------------------------------------ auth and identity
@@ -277,6 +278,39 @@ class Registry:
         return ok
 
     # ------------------------------------------------------------------ upkeep
+    # ------------------------------------------------------------------ leases across restarts
+    def _leases_path(self):
+        return self.arena.cfg.data_dir / "leases.json"
+
+    def save_leases(self):
+        """The leases out now, so an engine restart (a deploy) doesn't throw away every game
+        running on the rented machines: their results still count when they arrive."""
+        from dataclasses import asdict
+        with self.lock:
+            rows = [{"lease": lid, "worker": l["worker"], "expires": l["expires"], "job": asdict(l["job"])}
+                    for lid, l in self.leases.items()]
+        store.write_json(self._leases_path(), rows)
+
+    def _load_leases(self):
+        rows = store.read_json(self._leases_path(), []) or []
+        a, t, n = self.arena, time.time(), 0
+        for r in rows:
+            try:
+                d = dict(r["job"])
+                if d.get("duel") is not None:
+                    d["duel"] = tuple(d["duel"])
+                j = scheduler.Job(**d)
+            except Exception:
+                continue
+            if j.key in a.running:
+                continue
+            # a fresh lease time: the worker has been unable to heartbeat while we were down
+            self.leases[r["lease"]] = {"job": j, "worker": r["worker"], "expires": t + self.lease_seconds}
+            a.running[j.key] = {"job": j, "started": now(), "worker": r["worker"], "lease": r["lease"]}
+            n += 1
+        if n:
+            logging.getLogger("arena").info("workers: %d leases kept across the restart", n)
+
     def reap(self):
         """Drops expired leases (their games are owed again) and workers silent for a while."""
         t = time.time()
@@ -296,6 +330,7 @@ class Registry:
             for l in expired:
                 q.release(l["job"], l["worker"])      # owed again, first in line
             self.daemon.wake.set()
+        self.save_leases()
 
     def snapshot(self) -> list[dict]:
         cutoff = time.monotonic() - 3600

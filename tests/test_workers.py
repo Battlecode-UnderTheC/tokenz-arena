@@ -193,3 +193,23 @@ def test_a_machine_failure_is_played_again_and_final_after_three(setup):
         assert out["recorded"] == (attempt == 2)
     g = a.games[-1]
     assert g.error and g.meta["final_error"]
+
+
+def test_leases_survive_an_engine_restart(setup):
+    a, d, c, _ = setup
+    l = c.post("/api/v1/workers/lease", json=hello(want=1), headers=TOKEN).json()["leases"][0]
+    a.workers.save_leases()
+    a.running.clear()
+    reg = workers.Registry(a, d)                          # the engine starting again
+    assert l["lease"] in reg.leases and reg.leases[l["lease"]]["job"].key in a.running
+    a.workers = reg
+    meta = {"lease": l["lease"], "worker": "w1", "winner": "A", "rounds": 9, "reason": "elimination", "seconds": 1.0}
+    assert reg.result("w1", "lab", l["lease"], {k: meta.get(k) for k in ("winner", "rounds", "reason", "seconds")})["recorded"]
+
+
+def test_a_stopping_worker_says_why(setup):
+    a, d, c, _ = setup
+    r = c.post("/api/v1/workers/bye", json=hello(reason="crashed: OSError: too many open files", log=["x"]), headers=TOKEN)
+    assert r.json()["ok"]
+    row = json.loads((a.cfg.data_dir / "worker-exits.jsonl").read_text().splitlines()[-1])
+    assert row["worker"] == "w1" and row["reason"].startswith("crashed") and row["log"] == ["x"]

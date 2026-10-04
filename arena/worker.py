@@ -31,6 +31,15 @@ from arena import judge
 from arena.state import ENGINE
 
 log = logging.getLogger("arena.worker")
+TAIL: collections.deque = collections.deque(maxlen=100)    # the last log lines, sent on exit
+
+
+class _Tail(logging.Handler):
+    def emit(self, record):
+        try:
+            TAIL.append(self.format(record)[:500])
+        except Exception:
+            pass
 _BUILD: list = []
 
 
@@ -70,6 +79,7 @@ class Worker:
         self.last_work = time.monotonic()
         self.last_contact = time.monotonic()       # the arena last answered
         self.orphan_after = 0.0                    # exit after this long without the arena (0: never)
+        self.exit_reason = ""                      # why run() ended, told to the arena on exit
 
     def _new_pool(self) -> ProcessPoolExecutor:
         return ProcessPoolExecutor(max(1, self.slots), mp_context=mp.get_context("spawn"))
@@ -192,6 +202,16 @@ class Worker:
             with self.lock:
                 self.active.pop(lease, None)
 
+    def goodbye(self, reason: str):
+        """Tells the arena why this worker is stopping, with its last log lines, before a rented
+        machine destroys itself (and its logs with it). Best effort."""
+        try:
+            self._req("POST", "/api/v1/workers/bye",
+                      json.dumps({**self._hello(), "reason": reason[:4000], "log": list(TAIL)}).encode(),
+                      "application/json", timeout=20)
+        except Exception as e:
+            log.warning("couldn't say goodbye: %s", e)
+
     def _send_result(self, lease: str, res: dict, replay: Path | None):
         edge = uuid.uuid4().hex
         meta = json.dumps({**res, "lease": lease, "worker": self.name}).encode()
@@ -233,6 +253,7 @@ class Worker:
                 log.error("lease refused: HTTP %s %s", e.code, detail)
                 if e.code in (401, 409):
                     log.error("worker refused (token revoked or wrong judge): stopping")
+                    self.exit_reason = f"refused: HTTP {e.code} {detail[:200]}"
                     self.stopping.set()
                     break
                 time.sleep(15)
@@ -241,6 +262,7 @@ class Worker:
                 log.warning("can't reach the arena: %s", e)
                 if self.orphan_after and time.monotonic() - self.last_contact > self.orphan_after:
                     log.error("no arena for %ds: stopping", self.orphan_after)
+                    self.exit_reason = f"no arena for {self.orphan_after:.0f} s"
                     self.stopping.set()
                     break
                 time.sleep(15)
@@ -257,6 +279,7 @@ class Worker:
                 self.last_work = time.monotonic()
             elif self.idle_exit and not self.active and time.monotonic() - self.last_work > self.idle_exit:
                 log.info("idle for %ds: exiting", self.idle_exit)
+                self.exit_reason = f"idle for {self.idle_exit:.0f} s"
                 self.stopping.set()
                 break
             time.sleep(1 if leases else 5 * idle)
@@ -268,6 +291,9 @@ class Worker:
 
 def main(args) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    tail = _Tail()
+    tail.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(tail)
     env = os.environ.get
     token = args.token or env("ARENA_WORKER_TOKEN")
     arena = args.arena or env("ARENA_URL") or DEFAULT_ARENA
@@ -287,11 +313,19 @@ def main(args) -> int:
             resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
     except (ImportError, ValueError, OSError) as e:
         log.warning("couldn't raise the open-file limit: %s", e)
-    signal.signal(signal.SIGTERM, lambda *_: w.stopping.set())
-    signal.signal(signal.SIGINT, lambda *_: w.stopping.set())
+    def stop(signum, _):
+        w.exit_reason = w.exit_reason or f"signal {signum}"
+        w.stopping.set()
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     try:
         w.run()
+    except BaseException as e:
+        import traceback
+        w.exit_reason = f"crashed: {type(e).__name__}: {e}\n" + traceback.format_exc()[-3000:]
+        raise
     finally:
+        w.goodbye(w.exit_reason or "run() returned")
         if env("ARENA_SELF_DESTROY") == "1":
             self_destroy(env("CONTAINER_ID"), env("CONTAINER_API_KEY"))
     return 0

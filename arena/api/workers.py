@@ -7,6 +7,7 @@ the engine like every write, and the downloads (bot zips, maps) are served from 
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from arena import scheduler
-from arena.state import Arena
+from arena.state import Arena, now
 
 
 def token_name(arena: Arena, request: Request) -> str:
@@ -74,6 +75,20 @@ def make_router(arena: Arena) -> APIRouter:
                                        int(d.get("slots", 0)), tok,
                                        max(0, min(int(d.get("want", d.get("slots", 0))), 256)),
                                        str(d["build"])[:32] if d.get("build") else None)
+
+    @r.post("/bye")
+    async def bye(request: Request):
+        """A worker stopping says why, with its last log lines (a rented machine then destroys
+        itself, logs and all): appended to data_dir/worker-exits.jsonl."""
+        tok = token_name(arena, request)
+        d = await body(request)
+        row = {"at": now(), "worker": str(d["worker"])[:64], "token": tok, "reason": str(d.get("reason") or "")[:4000],
+               "log": [str(x)[:500] for x in (d.get("log") or [])][-100:]}
+        p = arena.cfg.data_dir / "worker-exits.jsonl"
+        with open(p, "a") as f:
+            f.write(json.dumps(row) + "\n")
+        logging.getLogger("arena").warning("worker %s stopped: %s", row["worker"], row["reason"].splitlines()[0][:200] if row["reason"] else "?")
+        return {"ok": True}
 
     @r.post("/heartbeat")
     async def heartbeat(request: Request):
