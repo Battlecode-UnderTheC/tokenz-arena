@@ -122,11 +122,11 @@ def rename_submissions(cfg: Config, table: Path, dry_run: bool = True,
             if (base / sid).exists():
                 (trash / name).mkdir(parents=True, exist_ok=True)
                 (base / sid).rename(trash / name / sid)
-    for g in removed_games:
-        p = cfg.games / f"{g.id}.json"
-        if p.exists():
-            (trash / "games").mkdir(parents=True, exist_ok=True)
-            p.rename(trash / "games" / p.name)
+    for g in removed_games:                   # a copy in removed/, then out of games.db
+        (trash / "games").mkdir(parents=True, exist_ok=True)
+        store.write_json(trash / "games" / f"{g.id}.json", asdict(g))
+    if removed_games:
+        arena.gamedb.delete([g.id for g in removed_games])
     for s in arena.subs.values():
         if s.id not in ren:
             store.write_json(cfg.submissions / s.id / "meta.json", asdict(s))   # cleared refs
@@ -140,8 +140,8 @@ def rename_submissions(cfg: Config, table: Path, dry_run: bool = True,
     for s in list(arena.subs.values()):
         s.id = fix(s.id)
         store.write_json(cfg.submissions / s.id / "meta.json", asdict(s))
-    for g in changed_games:
-        store.write_json(cfg.games / f"{g.id}.json", asdict(g))
+    if changed_games:
+        arena.gamedb.put_many([asdict(g) for g in changed_games])
     store.write_json(cfg.data_dir / "bots.json", new_bots)
     ratings = store.read_json(cfg.data_dir / "ratings.json", {}) or {}
     store.write_json(cfg.data_dir / "ratings.json", {fix(k): v for k, v in ratings.items()})

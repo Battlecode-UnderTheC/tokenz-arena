@@ -116,6 +116,7 @@ class Arena:
         self.bots: dict[str, dict] = {}
         self.running: dict[tuple, dict] = {}     # job key -> {job, started}
         self.by_sub: dict[str, list[Game]] = {}  # submission id -> its games (games_of)
+        self.game_by_id: dict[int, Game] = {}
         self.paused = False
         self.started = now()
         self._load()
@@ -130,9 +131,12 @@ class Arena:
         for meta in sorted(self.cfg.submissions.glob("*/meta.json")):
             d = store.read_json(meta)
             self.subs[d["id"]] = Submission(**d)
-        for g in store.load_all(self.cfg.games, "*.json"):
-            self.games.append(Game(**g))
-        self.games.sort(key=lambda g: g.id)
+        from arena.gamedb import GameDB
+        self.gamedb = GameDB(self.cfg.data_dir / "games.db", None if self.readonly else self.cfg.games,
+                             readonly=self.readonly)
+        self._game_epoch = self.gamedb.epoch()
+        self.games = [Game(**g) for g in self.gamedb.all()]
+        self._game_version = self.gamedb.version
         self._index()
         self.bots = store.read_json(self.cfg.data_dir / "bots.json", {})
         # A submission caught mid-check or mid-play by a restart just continues.
@@ -167,17 +171,15 @@ class Arena:
                 d = store.read_json(meta)
                 if d:
                     subs[d["id"]] = Submission(**d)
-        new_games = []
+        # games: what the engine added or edited since we last looked (a deletion, rare, makes
+        # it read everything again)
+        epoch = self.gamedb.epoch()
+        full = full or epoch != self._game_epoch
         if full:
-            new_games = [Game(**g) for g in store.load_all(self.cfg.games, "*.json")]
+            new_games, version = [Game(**g) for g in self.gamedb.all()], self.gamedb.version
         else:
-            nxt = (self.games[-1].id + 1) if self.games else 1
-            while (p := self.cfg.games / f"{nxt}.json").exists():
-                d = store.read_json(p)
-                if not d:
-                    break
-                new_games.append(Game(**d))
-                nxt += 1
+            rows, version = self.gamedb.since(self._game_version)
+            new_games = [Game(**g) for g in rows]
         bots = store.read_json(self.cfg.data_dir / "bots.json", None) \
             if changed(self.cfg.data_dir / "bots.json") else None
         ratings = store.read_json(self.cfg.data_dir / "ratings.json", None) \
@@ -205,9 +207,21 @@ class Arena:
                 self.games = sorted(new_games, key=lambda g: g.id)
                 self._index()
             elif new_games:
-                self.games.extend(new_games)
+                reindex = False
                 for g in new_games:
-                    self._index_game(g)
+                    old = self.game_by_id.get(g.id)
+                    if old is None:                   # new: ids only grow
+                        if self.games and g.id < self.games[-1].id:
+                            reindex = True
+                        self.games.append(g)
+                        self._index_game(g)
+                    else:                             # edited in place: same object, new fields
+                        reindex |= (old.a, old.b) != (g.a, g.b)
+                        old.__dict__.update(g.__dict__)
+                if reindex:
+                    self.games.sort(key=lambda g: g.id)
+                    self._index()
+            self._game_version, self._game_epoch = version, epoch
             if bots is not None:
                 self.bots = bots
             if ratings is not None:
@@ -220,12 +234,12 @@ class Arena:
             g.id = (self.games[-1].id + 1) if self.games else 1
             self.games.append(g)
             self._index_game(g)
-            store.write_json(self.cfg.games / f"{g.id}.json", asdict(g))
+            self.gamedb.put(asdict(g))
             return g
 
     def save_game(self, g: Game):
         if not self.readonly:
-            store.write_json(self.cfg.games / f"{g.id}.json", asdict(g))
+            self.gamedb.put(asdict(g))
 
     # ----------------------------------------------------------------- queries
     def next_id(self, bot: str) -> str:
@@ -245,10 +259,12 @@ class Arena:
 
     def _index(self):
         self.by_sub = {}
+        self.game_by_id = {}
         for g in self.games:
             self._index_game(g)
 
     def _index_game(self, g: Game):
+        self.game_by_id[g.id] = g
         self.by_sub.setdefault(g.a, []).append(g)
         if g.b != g.a:
             self.by_sub.setdefault(g.b, []).append(g)

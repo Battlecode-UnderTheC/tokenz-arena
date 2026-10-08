@@ -112,7 +112,7 @@ def _web(args: argparse.Namespace) -> int:
             time.sleep(1)
             n += 1
             try:
-                arena.refresh(full=(n % 120 == 0))
+                arena.refresh()                 # new and edited games come from games.db versions
             except Exception:
                 logging.getLogger("arena").exception("refresh failed")
     threading.Thread(target=follow, daemon=True, name="refresh").start()

@@ -244,10 +244,8 @@ def set_parent(arena: Arena, sid: str, parent: str | None, by: str) -> object:
 
 def find_game(arena: Arena, gid: int):
     """A game by id; holdout games are hidden (None), so their maps and replays never leak."""
-    for g in reversed(arena.games):
-        if g.id == gid:
-            return None if g.suite == "holdout" else g
-    return None
+    g = arena.game_by_id.get(gid)
+    return None if g is None or g.suite == "holdout" else g
 
 
 def map_stats(arena: Arena) -> list[dict]:
