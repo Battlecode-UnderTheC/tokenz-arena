@@ -18,7 +18,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
-from arena import judge, judge_checks, queue, rating, scheduler, store, submit
+from arena import judge, judge_checks, queue, rating, scheduler, store, submit, watchdog
 from arena.state import CHECKING, ENGINE, INFRA_TRIES, Arena, Game, infra_error, now
 
 log = logging.getLogger("arena")
@@ -117,10 +117,12 @@ class Daemon:
             self.checking.add(s.id)
             self.checks.submit(self._check_ephemeral if duels.is_ephemeral(s.id) else self._check, s)
         q = queue.get(a)
-        q.sync()
+        with watchdog.timed("queue sync"):
+            q.sync()
         if time.monotonic() - self._snapshot_at >= queue.SNAPSHOT_SECONDS:
             self._snapshot_at = time.monotonic()
-            q.snapshot()
+            with watchdog.timed("queue snapshot"):
+                q.snapshot()
         free = self.workers - self.busy()
         if free <= 0:
             return
@@ -129,7 +131,8 @@ class Daemon:
 
     def _task(self, fn, name):
         try:
-            fn()
+            with watchdog.timed(f"task {name}"):
+                fn()
         except Exception:
             log.error("task %s failed:\n%s", name, traceback.format_exc())
 
@@ -245,6 +248,7 @@ class Daemon:
             self.rate()
 
     def rate(self):
-        r = rating.fit(self.arena)
+        with watchdog.timed("ratings refit"):
+            r = rating.fit(self.arena)
         self.arena.ratings = r
         store.write_json(self.arena.cfg.data_dir / "ratings.json", r)

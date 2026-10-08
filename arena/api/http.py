@@ -311,6 +311,15 @@ def create_app(arena: Arena, engine_url: str | None = None) -> FastAPI:
     who.TRUST_HEADERS = bool(arena.cfg.get("api", "trust_tailscale_headers", False))
     app = FastAPI(title="tokenz-arena", version="0.1", docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
+
+    @app.middleware("http")
+    async def timing(request: Request, call_next):      # arena/watchdog.py: what makes the API slow
+        from arena import watchdog
+        n = watchdog.begin(f"{request.method} {request.url.path}")
+        try:
+            return await call_next(request)
+        finally:
+            watchdog.end(n)
     if engine_url:
         import httpx2 as httpx
         from fastapi.responses import Response
